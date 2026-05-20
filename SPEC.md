@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.1.0 (bootstrap, 2026-05-20)
+**Version:** 0.2.0 (2026-05-20)
 **Status:** Draft — under joint review by adopters and consumers.
 
 ## 0. Scope and audience
@@ -147,6 +147,8 @@ Every library MUST export the following four integer equates (in `src/lib_versio
 | `LIB_<X>_RESIDENT_BYTES` | Approximate code+rodata footprint that must remain CPU-resident in any consumer. Refreshed per release. |
 | `LIB_<X>_COLD_BYTES` | Approximate code+rodata footprint that a consumer MAY overlay-page (load on demand from REU, kernal-banked RAM, or external storage). Refreshed per release. |
 
+Libraries that consume one or more shared primitives defined in §8 MUST additionally export a `LIB_<X>_SHARED_PRIMITIVES` bitmask equate, ORed from the per-primitive bit constants declared in each §8.x sub-clause. The bitmask lets consumers detect duplicate ownership of any shared primitive at assemble time. See §8 for the bit allocation table and per-primitive bit names.
+
 These let a consumer's cfg do assemble-time fit checks:
 
 ```asm
@@ -180,22 +182,100 @@ Consumers fetch `build/lib/<libname>-<variant>.a` and link directly. No mid-buil
 
 While the contract is in v0.x (pre-1.0), breaking changes happen freely with MINOR bumps. Once v1.0 ships, breaking changes go through a one-MINOR-release deprecation cycle.
 
-## 8. Compatibility timeline
+## 8. Shared primitives
+
+Some primitives are reimplemented identically across multiple sibling libraries. When a consumer links several of those libraries into the same PRG, each one defines its own copy of the table at its own address, wasting resident RAM and boot cycles, and — more importantly — making the placement decision per-library rather than per-consumer. This section names primitives where the duplication has been confirmed across at least two adopters, fixes the *shape* every implementation must agree on, and leaves the *address* to the consumer via the `--asm-define` override mechanism already established in §2 and §3.
+
+A primitive listed here is opt-in per library: an adopter MAY continue to ship its own private copy until it migrates. Once migrated, the library reflects ownership of the primitive in its `LIB_<X>_SHARED_PRIMITIVES` bitmask manifest equate (§5) so consumers can detect double-ownership at assemble time.
+
+### 8.0 Bit allocation for `LIB_<X>_SHARED_PRIMITIVES`
+
+Each §8.x sub-clause declares one bit constant of the form `LIB_SHARED_PRIMITIVES_<NAME>`. Bits are append-only and never reused: a primitive that is later deprecated keeps its bit reserved so old consumer cfgs that `.assert` on the bit continue to parse against newer SPEC revisions. New §8.x sub-clauses allocate the next free bit and update the table below.
+
+| Bit | Constant | Primitive | Defined in |
+|---|---|---|---|
+| `$0001` | `LIB_SHARED_PRIMITIVES_SQTAB` | 8×8 quarter-square multiply table | §8.1 |
+
+Consumer-side composition:
+
+```asm
+.import LIB_NISTCURVES_SHARED_PRIMITIVES
+.import LIB_CHACHA20_POLY1305_SHARED_PRIMITIVES
+.assert (LIB_NISTCURVES_SHARED_PRIMITIVES .and LIB_CHACHA20_POLY1305_SHARED_PRIMITIVES) = 0, error, "shared-primitive double-ownership"
+```
+
+Two libraries linked into the same PRG must not both claim ownership of the same primitive; whichever lib's standalone build defined the canonical labels first owns them at integration time, the others' definitions are gated out per the per-primitive migration switch.
+
+### 8.1 Shared 8×8 quarter-square multiply table (`sqtab`)
+
+**Failure mode this prevents.** On 2026-05-17 the `c64-nist-curves` repo had to relocate its multiply table from `$7800` to `$9c00` because code growth pushed neighbouring data into the previous sqtab base and silently corrupted the table at boot. The same primitive is independently defined in five sibling libraries at four different addresses today (see issue [JC-000/c64-lib-contract#5](https://github.com/JC-000/c64-lib-contract/issues/5) for the audit). This clause exists to give the consumer a single placement point so the next "silent overwrite at boot" incident becomes a link-time error instead.
+
+**Semantics.** Two byte tables `sqtab_lo` and `sqtab_hi`, each 512 bytes, such that
+
+```
+(sqtab_hi[n] << 8) | sqtab_lo[n] = floor(n² / 4)   for n ∈ 0..510
+```
+
+Used to implement `a*b = t(a+b) - t(a-b)` where `t(k) = floor(k²/4)`. Index 511 is unused; the 512-byte size is forced by the page-alignment / page-delta constraints below.
+
+**Placement contract.** The consumer chooses the base address via the equate `LIB_SHARED_SQTAB_BASE`. Each adopting library's canonical header MUST follow this shape:
+
+```asm
+.ifndef LIB_SHARED_SQTAB_BASE
+    LIB_SHARED_SQTAB_BASE = $...          ; per-lib default for standalone builds
+.endif
+sqtab_lo = LIB_SHARED_SQTAB_BASE
+sqtab_hi = LIB_SHARED_SQTAB_BASE + $0200
+
+.assert (LIB_SHARED_SQTAB_BASE & $00ff) = 0, error, "sqtab base must be page-aligned"
+.assert sqtab_hi = sqtab_lo + $0200,        error, "sqtab_hi must follow sqtab_lo by $0200"
+```
+
+The `.ifndef` guard lets the library assemble standalone with its existing default; the consumer overrides via `ca65 --asm-define LIB_SHARED_SQTAB_BASE=$<addr>`. The two `.assert`s catch misconfigurations at assemble time:
+
+- `LIB_SHARED_SQTAB_BASE & $00ff == 0` — CT-strict `abs,x` indexing requires a page-aligned base for cycle-stable loads.
+- `sqtab_hi - sqtab_lo == $0200` — adopters that dispatch via self-modifying code on the lo→hi delta fold this constant into the opcode hi-byte patching; alternative deltas silently miscompute.
+
+The contract pins *shape*, not *placement*. A consumer linking multiple sqtab-using libraries supplies one `--asm-define LIB_SHARED_SQTAB_BASE=$<addr>` and the libraries agree.
+
+**Init.** The canonical init entry point is `mul_tables_init`. It populates both tables from the quarter-square recurrence and MUST be idempotent — calling it twice produces the same table state and has no side effects beyond the table bytes.
+
+**Migration shape.** Each adopting library MAY keep its existing per-lib `sqtab_init` exported for backwards compatibility. Under `.ifdef SHARED_SQTAB_INIT`, the library's own init body is gated out and the canonical `mul_tables_init` takes over. This lets a consumer flip libraries to the shared init one at a time without an atomic cross-repo cutover.
+
+**Bit allocation.** This primitive owns bit `$0001`:
+
+```asm
+LIB_SHARED_PRIMITIVES_SQTAB = $0001
+```
+
+Adopters OR this bit into their `LIB_<X>_SHARED_PRIMITIVES` manifest equate (§5). For a lib that consumes only `sqtab` today:
+
+```asm
+LIB_<X>_SHARED_PRIMITIVES = LIB_SHARED_PRIMITIVES_SQTAB
+```
+
+**Related future promotion.** The multiply body that consumes the table (`mul_8x8` / `ct_mul_8x8`) is duplicated across the same set of libraries. The CT-strict `ct_mul_8x8` variant (introduced by `c64-ChaCha20-Poly1305` v0.3.0, already ported by `c64-nist-curves`) is the right candidate to promote alongside `sqtab` once two or more adopters confirm bit-identical bodies. This clause does not pre-commit to that promotion; it is named here so adopters know which variant to align on if they touch the multiply body during the sqtab migration.
+
+## 9. Compatibility timeline
 
 - **2026-05-20 — v0.1.0 (this draft).** Contract is published; adopters land iteratively. Tracking issues filed against each adopter library.
 - **v1.0 — target: when all current adopters (see [adopters.md](adopters.md)) have landed all six sections.** Contract is then stable; breaking changes go through a deprecation cycle.
 
 The v1.0 cutover triggers a coordinated tag bump (every adopter to `LIB_ABI_VERSION = 1`) so consumers can pin against `LIB_ABI_VERSION >= 1` and know all six contract sections are present.
 
-## 9. Adopters
+## 10. Adopters
 
 See [adopters.md](adopters.md) for the status table and tracking issues per library.
 
-## 10. Consumers
+## 11. Consumers
 
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
-## 11. Changelog
+## 12. Changelog
+
+### 0.2.0 — 2026-05-20
+
+Additive: new §8 "Shared primitives" with the first entry §8.1 covering the 8×8 quarter-square multiply table (`sqtab_lo` / `sqtab_hi`, `LIB_SHARED_SQTAB_BASE` equate, page-alignment + page-delta `.assert`s, canonical `mul_tables_init` entry point, `SHARED_SQTAB_INIT` migration switch). §5 extended to require an append-only `LIB_<X>_SHARED_PRIMITIVES` bitmask manifest equate whenever an adopter consumes a §8 primitive; bit `$0001` (`LIB_SHARED_PRIMITIVES_SQTAB`) allocated for the §8.1 entry. Sections 8/9/10/11 in the previous draft renumbered to 9/10/11/12. No breaking changes — adopters that do not consume §8 primitives are unaffected. Motivated by [JC-000/c64-lib-contract#5](https://github.com/JC-000/c64-lib-contract/issues/5) and the 2026-05-17 `c64-nist-curves` boot-time corruption incident referenced there.
 
 ### 0.1.0 — 2026-05-20
 
