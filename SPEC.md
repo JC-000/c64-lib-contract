@@ -335,7 +335,7 @@ Adopters OR it into their `LIB_<X>_SHARED_PRIMITIVES` manifest equate (§5) and 
 LIB_PRECALC_TABLE "reu_mul", 131072, PRECALC_REGION_REU, PRECALC_SHARED_YES
 ```
 
-The string `"reu_mul"` is **normative**; adopters MUST NOT substitute a library-prefixed variant (e.g., `"nistcurves_reu_mul"` or `"x25519_reu_mul"`). The cross-adopter audit `nm build/*.a | grep LIB_PRECALC_REU_MUL_SIZE` depends on every adopter exporting the same `LIB_PRECALC_REU_MUL_*` symbol family. Size (`131072`) and region (`PRECALC_REGION_REU`) are also normative — they are invariants of the shared shape — only placement (the `LIB_SHARED_REU_MUL_BANK` equate above) is consumer-chosen.
+The string `"reu_mul"` is **normative**; adopters MUST NOT substitute a library-prefixed variant (e.g., `"nistcurves_reu_mul"` or `"x25519_reu_mul"`). The cross-adopter audit `od65 --dump-exports build/*.o | grep LIB_PRECALC_reu_mul_SIZE` depends on every adopter exporting the same `LIB_PRECALC_reu_mul_*` symbol family. (`od65` is the cc65 object-file inspector; ca65 `.o` files are not in ELF/Mach-O format so standard `nm` cannot read them. Symbol case is preserved from the macro argument — see §8.0.) Size (`131072`) and region (`PRECALC_REGION_REU`) are also normative — they are invariants of the shared shape — only placement (the `LIB_SHARED_REU_MUL_BANK` equate above) is consumer-chosen.
 
 **Worked consumer layout (TLS 1.3 stack).** A consumer that links `c64-nist-curves` (consumes §8.2 plus its own Lim-Lee comb at a private REU bank), `c64-x25519` (consumes §8.2 plus its own pre-doubled tables at private REU banks under `SQR_DMA_K > 0`), and `c64-ChaCha20-Poly1305` (consumes §8.1 sqtab only, no §8.2) might cfg as follows:
 
