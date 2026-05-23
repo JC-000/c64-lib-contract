@@ -277,7 +277,7 @@ Rows are addressed `[a * 512]` where `a ∈ [0..255]`. Rows `0..127` live in the
 .ifndef LIB_SHARED_REU_MUL_OFFSET
     LIB_SHARED_REU_MUL_OFFSET = $0000
 .endif
-LIB_SHARED_REU_MUL_BANKS_USED = (1 << LIB_SHARED_REU_MUL_BANK) | (1 << (LIB_SHARED_REU_MUL_BANK + 1))
+LIB_SHARED_REU_MUL_BANKS_USED = (1 .shl LIB_SHARED_REU_MUL_BANK) | (1 .shl (LIB_SHARED_REU_MUL_BANK + 1))
 
 .assert LIB_SHARED_REU_MUL_OFFSET = $0000, error, "reu_mul must start at offset 0 within its bank pair (v0.x.0 constraint)"
 .assert LIB_SHARED_REU_MUL_BANK < $FE,     error, "reu_mul base bank must leave room for the hi-half bank at base+1"
@@ -288,7 +288,7 @@ The `.ifndef` guards let each library assemble standalone with its existing defa
 - `LIB_SHARED_REU_MUL_OFFSET = $0000` — current adopters require start-of-bank for row-stride math. Annotated as a v0.x.0 constraint; loosen only on a justified non-zero need from a future adopter.
 - `LIB_SHARED_REU_MUL_BANK < $FE` — the table claims two contiguous banks (`base` and `base + 1`), so `base = $FF` has no successor.
 
-`LIB_SHARED_REU_MUL_BANKS_USED` is a derived equate that names both claimed banks as a single mask. Consumers compose it into their REU-region `.assert` budget instead of writing `(1 << bank) | (1 << (bank + 1))` at every callsite; libraries OR it into their own `LIB_<X>_REU_BANKS_USED` (§5) when they consume the canonical primitive.
+`LIB_SHARED_REU_MUL_BANKS_USED` is a derived equate that names both claimed banks as a single mask. Consumers compose it into their REU-region `.assert` budget instead of writing `(1 .shl bank) | (1 .shl (bank + 1))` at every callsite; libraries OR it into their own `LIB_<X>_REU_BANKS_USED` (§5) when they consume the canonical primitive.
 
 **ZP and staging-buffer surface.** The canonical init and per-row fetch share two ZP scratch slots and a page-aligned main-RAM staging buffer pair. Both follow the §2 / §3 `.ifndef` pattern so consumers compose without collision:
 
@@ -329,6 +329,14 @@ LIB_SHARED_PRIMITIVES_REU_MUL = $0002
 
 Adopters OR it into their `LIB_<X>_SHARED_PRIMITIVES` manifest equate (§5) and the existing §8.0 `.assert` catches accidental cross-library double-ownership.
 
+**§8.0 catch-loop registry.** Adopters consuming this primitive MUST emit, in addition to the manifest-equate bit above, one §8.0 catch-loop macro invocation:
+
+```ca65
+LIB_PRECALC_TABLE "reu_mul", 131072, PRECALC_REGION_REU, PRECALC_SHARED_YES
+```
+
+The string `"reu_mul"` is **normative**; adopters MUST NOT substitute a library-prefixed variant (e.g., `"nistcurves_reu_mul"` or `"x25519_reu_mul"`). The cross-adopter audit `nm build/*.a | grep LIB_PRECALC_REU_MUL_SIZE` depends on every adopter exporting the same `LIB_PRECALC_REU_MUL_*` symbol family. Size (`131072`) and region (`PRECALC_REGION_REU`) are also normative — they are invariants of the shared shape — only placement (the `LIB_SHARED_REU_MUL_BANK` equate above) is consumer-chosen.
+
 **Worked consumer layout (TLS 1.3 stack).** A consumer that links `c64-nist-curves` (consumes §8.2 plus its own Lim-Lee comb at a private REU bank), `c64-x25519` (consumes §8.2 plus its own pre-doubled tables at private REU banks under `SQR_DMA_K > 0`), and `c64-ChaCha20-Poly1305` (consumes §8.1 sqtab only, no §8.2) might cfg as follows:
 
 ```asm
@@ -342,10 +350,10 @@ Under that cfg the three adopters' `LIB_<X>_REU_BANKS_USED` manifest equates res
 
 **Related future promotions.** Two follow-ups carry across from this clause:
 
-- `mul_8x8` / `ct_mul_8x8` — the multiply body that consumes the table. Promotion is gated on a cross-adopter `ct_mul_brute_check` round-trip confirming bit-identical SMC bodies between `c64-nist-curves` and `c64-x25519`; until that round-trip lands, each adopter ships its own copy. The §8.1 forward-look already names this candidate; this clause re-affirms it with the stronger evidence bar.
-- `c64-x25519`'s `reu_fetch_doubled_row` — structurally identical to `reu_fetch_mul_row` with a different bank base. A SMC-parameterized shared fetch could replace it for a small code-size win, deferred until the §8.2 baseline ships across both adopters.
+- `mul_8x8` / `ct_mul_8x8` — the multiply body that consumes the table. Promotion is gated on a cross-adopter `ct_mul_brute_check` round-trip confirming bit-identical SMC bodies between `c64-nist-curves` and `c64-x25519`; until that round-trip lands, each adopter ships its own copy. The §8.1 forward-look already names this candidate; this clause re-affirms it with the stronger evidence bar. Tracked in [JC-000/c64-lib-contract#14](https://github.com/JC-000/c64-lib-contract/issues/14).
+- `c64-x25519`'s `reu_fetch_doubled_row` — structurally identical to `reu_fetch_mul_row` with a different bank base. A SMC-parameterised shared fetch could replace it for a small code-size win, deferred until the §8.2 baseline ships across both adopters. Tracked in [JC-000/c64-lib-contract#15](https://github.com/JC-000/c64-lib-contract/issues/15).
 
-Both deferrals are tracked as separate issues once filed; this clause does not pre-commit to either.
+This clause does not pre-commit to either promotion; the tracking issues stay open until the evidence gates (#14: cross-adopter brute-check round-trip; #15: §8.2 baseline shipped) are satisfied.
 
 ## 9. Compatibility timeline
 
