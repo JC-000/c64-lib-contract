@@ -221,16 +221,16 @@ Tables below this floor (ChaCha20 quarter-round constants, mod-n reduction one-o
 **Two-form enumeration.** Each enumerated table is recorded in *both* of the following forms:
 
 1. **Doc-level** in `docs/precalc-tables.md` (or equivalent path linked from the adopter's `adopters.md` row): name, size, region, source file, classification (curve-/algorithm-specific *or* potentially shareable), and the rationale for the classification. The rationale is the load-bearing field — writing it down forces the maintainer to think through whether a sibling library might converge on the same shape.
-2. **Assembler-level** via the `LIB_PRECALC_TABLE` macro (canonical source below). The macro emits three exported equates per invocation that survive doc rot and make build-time audits mechanical: `grep -r 'LIB_PRECALC_' src/` adopter-local, `nm build/lib.a | grep LIB_PRECALC` post-build.
+2. **Assembler-level** via the `LIB_PRECALC_TABLE` macro (canonical source below). The macro emits three exported equates per invocation that survive doc rot and make build-time audits mechanical: `grep -r 'LIB_PRECALC_' src/` adopter-local, `od65 --dump-exports build/lib.o | grep LIB_PRECALC` post-build (cc65 toolchain; `od65` is the cc65 object-file inspector that reads ca65 `.o` and `.a` archives).
 
 Both forms are required. The doc captures shape and rationale; the macro captures size, region, and sharing as build-time data. An asymmetry between the two (a `LIB_PRECALC_*` export with no `docs/precalc-tables.md` row, or vice versa) blocks the adopter PR per the intake-reviewer-MUST rule in `adopters.md`.
 
-**Canonical `precalc_table.inc`.** Adopters copy this verbatim into one `src/precalc_table.inc` file and `.include` it from a single translation unit. Updates land via coordinated cross-repo PR; do not edit locally.
+**Canonical `precalc_table.inc`.** The byte-for-byte canonical source lives at [`precalc_table.inc`](precalc_table.inc) in this repo's root and is smoke-tested under [`examples/precalc_table_smoke.s`](examples/precalc_table_smoke.s) via `make verify`. Adopters copy that file verbatim into one `src/precalc_table.inc` file and `.include` it from a single translation unit. Updates land via coordinated cross-repo PR; do not edit local copies. The fenced block below is shown for reading; do not retype from it — copy the file.
 
 ```ca65
 ; precalc_table.inc — canonical per c64-lib-contract SPEC §8.0 catch-loop.
-; Copy verbatim into each adopter's src/. Updates land via coordinated
-; cross-repo PR; do not edit locally.
+; Copy verbatim from this repo's root into each adopter's src/. Updates
+; land via coordinated cross-repo PR; do not edit local copies.
 
 .ifndef PRECALC_TABLE_INC_INCLUDED
 PRECALC_TABLE_INC_INCLUDED = 1
@@ -250,20 +250,30 @@ PRECALC_SHARED_YES     = $01
 ;   region:       PRECALC_REGION_RAM | _REU | _RODATA
 ;   shared:       PRECALC_SHARED_YES | PRECALC_SHARED_NO
 ;
-; Emits three exported equates per invocation:
+; Emits three exported equates per invocation. The macro preserves the
+; case of the `name` argument verbatim (ca65 has no built-in toupper),
+; so `LIB_PRECALC_TABLE "sqtab", ...` emits the symbols below in their
+; lower-case form. The normative §8.x canonical names use
+; lower_snake_case throughout, so cross-adopter audits grep on a single
+; case convention:
 ;
-;   LIB_PRECALC_<NAME>_SIZE     = size_bytes
-;   LIB_PRECALC_<NAME>_REGION   = region
-;   LIB_PRECALC_<NAME>_SHARED   = shared
+;   LIB_PRECALC_<name>_SIZE     = size_bytes
+;   LIB_PRECALC_<name>_REGION   = region
+;   LIB_PRECALC_<name>_SHARED   = shared
+;
+; SIZE is exported without an address-size hint so values > 16 bits
+; (e.g. the 131072-byte REU mul table) export cleanly as 'far' without
+; a "far but exported absolute" warning. REGION and SHARED are
+; byte-valued and exported without a hint for consistency.
 
 .macro LIB_PRECALC_TABLE name, size_bytes, region, shared
     .ident (.sprintf("LIB_PRECALC_%s_SIZE",   name)) = size_bytes
     .ident (.sprintf("LIB_PRECALC_%s_REGION", name)) = region
     .ident (.sprintf("LIB_PRECALC_%s_SHARED", name)) = shared
 
-    .export .ident (.sprintf("LIB_PRECALC_%s_SIZE",   name)) : abs
-    .export .ident (.sprintf("LIB_PRECALC_%s_REGION", name)) : abs
-    .export .ident (.sprintf("LIB_PRECALC_%s_SHARED", name)) : abs
+    .export .ident (.sprintf("LIB_PRECALC_%s_SIZE",   name))
+    .export .ident (.sprintf("LIB_PRECALC_%s_REGION", name))
+    .export .ident (.sprintf("LIB_PRECALC_%s_SHARED", name))
 .endmacro
 
 .endif ; PRECALC_TABLE_INC_INCLUDED
@@ -283,11 +293,13 @@ LIB_PRECALC_TABLE "sha384_k",     640,    PRECALC_REGION_RODATA, PRECALC_SHARED_
 **Consumer-side composition** (optional, for the consumer cfg that wants to cross-check at link time):
 
 ```asm
-.import LIB_PRECALC_REU_MUL_SHARED
-.import LIB_PRECALC_REU_MUL_SIZE
-.assert LIB_PRECALC_REU_MUL_SHARED = PRECALC_SHARED_YES, error, "if this lib reports reu_mul, it MUST claim sharing"
-.assert LIB_PRECALC_REU_MUL_SIZE  = 131072,             error, "reu_mul size mismatch — bit-identical shape required for §8.2"
+.import LIB_PRECALC_reu_mul_SHARED
+.import LIB_PRECALC_reu_mul_SIZE
+.assert LIB_PRECALC_reu_mul_SHARED = PRECALC_SHARED_YES, error, "if this lib reports reu_mul, it MUST claim sharing"
+.assert LIB_PRECALC_reu_mul_SIZE   = 131072,             error, "reu_mul size mismatch — bit-identical shape required for §8.2"
 ```
+
+Note the symbol case: `LIB_PRECALC_reu_mul_*` with lower-case middle component. The macro preserves the literal case of the `name` argument since ca65 has no built-in toupper; the normative §8.x canonical names use lower_snake_case so adopters and consumers grep on a single case convention.
 
 **Audit triggers.** A precalc table flagged `PRECALC_SHARED_YES` by two or more adopters at byte-identical size + region is a §8.x promotion candidate. The audit step runs:
 
@@ -344,6 +356,14 @@ Adopters OR this bit into their `LIB_<X>_SHARED_PRIMITIVES` manifest equate (§5
 ```asm
 LIB_<X>_SHARED_PRIMITIVES = LIB_SHARED_PRIMITIVES_SQTAB
 ```
+
+**§8.0 catch-loop registry.** Adopters consuming this primitive MUST emit, in addition to the manifest-equate bit above, one §8.0 catch-loop macro invocation:
+
+```ca65
+LIB_PRECALC_TABLE "sqtab", 1024, PRECALC_REGION_RAM, PRECALC_SHARED_YES
+```
+
+The string `"sqtab"` is **normative**; adopters MUST NOT substitute a library-prefixed variant (e.g., `"nistcurves_sqtab"` or `"chacha_sqtab"`). The cross-adopter audit `od65 --dump-exports build/*.o | grep LIB_PRECALC_sqtab_SIZE` depends on every adopter exporting the same `LIB_PRECALC_sqtab_*` symbol family. Size (`1024`) and region (`PRECALC_REGION_RAM`) are also normative — they are invariants of the shared shape — only placement (the `LIB_SHARED_SQTAB_BASE` equate above) is consumer-chosen.
 
 **Related future promotion.** The multiply body that consumes the table (`mul_8x8` / `ct_mul_8x8`) is duplicated across the same set of libraries. The CT-strict `ct_mul_8x8` variant (introduced by `c64-ChaCha20-Poly1305` v0.3.0, already ported by `c64-nist-curves`) is the right candidate to promote alongside `sqtab` once two or more adopters confirm bit-identical bodies. This clause does not pre-commit to that promotion; it is named here so adopters know which variant to align on if they touch the multiply body during the sqtab migration.
 
@@ -464,7 +484,7 @@ See [consumers.md](consumers.md) for the list of consumer projects relying on th
 
 ### 0.3.1 — 2026-05-23
 
-Additive: §8.0 extended with a "Catch loop: enumeration at adopter intake" subsection that makes precalculated-table enumeration mandatory at adopter intake. Introduces (a) a size + access-pattern floor (≥ 256 B AND one of: REU-resident / hot-loop-read / page-aligned) so the catalog stays signal-rich, (b) a two-form enumeration requirement — `docs/precalc-tables.md` for human-readable shape + classification rationale, and a `LIB_PRECALC_TABLE` ca65 macro for build-time discoverability via three exported `LIB_PRECALC_<NAME>_{SIZE,REGION,SHARED}` equates per table, (c) the canonical `precalc_table.inc` source as a verbatim copy-target for adopters, (d) audit triggers covering new adopter, new-minor adding a table, **and generalisation of a previously curve-/algorithm-specific table** (with the c448 / Ed448 re-classification example). Asymmetry between the doc and macro forms blocks adopter PRs per the new intake-reviewer-MUST rule in `adopters.md` step 6. No breaking changes — pre-existing adopters acquire a §8.0 obligation at their next adoption-status update PR. Motivated by [JC-000/c64-lib-contract#11](https://github.com/JC-000/c64-lib-contract/issues/11) and the observation that both §8.1 (`sqtab`) and §8.2 (`reu_mul`) were caught reactively rather than at intake.
+Additive: §8.0 extended with a "Catch loop: enumeration at adopter intake" subsection that makes precalculated-table enumeration mandatory at adopter intake. Introduces (a) a size + access-pattern floor (≥ 256 B AND one of: REU-resident / hot-loop-read / page-aligned) so the catalog stays signal-rich, (b) a two-form enumeration requirement — `docs/precalc-tables.md` for human-readable shape + classification rationale, and a `LIB_PRECALC_TABLE` ca65 macro for build-time discoverability via three exported `LIB_PRECALC_<name>_{SIZE,REGION,SHARED}` equates per table (case-preserved from the macro argument), (c) the canonical [`precalc_table.inc`](precalc_table.inc) source at the repo root as the verbatim copy-target for adopters, smoke-tested under [`examples/precalc_table_smoke.s`](examples/precalc_table_smoke.s) via `make verify` covering all six (region × shared) combinations and the 65 536-byte `far`-export regression guard, (d) audit triggers covering new adopter, new-minor adding a table, **and generalisation of a previously curve-/algorithm-specific table** (with the c448 / Ed448 re-classification example), (e) per-§8.x back-link sub-paragraphs pinning canonical macro arguments (`"sqtab"` / `"reu_mul"`) as normative and forbidding library-prefixed substitutions so cross-adopter `od65 --dump-exports` grep stays signal-rich. Asymmetry between the doc and macro forms blocks adopter PRs per the new intake-reviewer-MUST rule in `adopters.md` step 6. No breaking changes — pre-existing adopters acquire a §8.0 obligation at their next adoption-status update PR. Motivated by [JC-000/c64-lib-contract#11](https://github.com/JC-000/c64-lib-contract/issues/11) and the observation that both §8.1 (`sqtab`) and §8.2 (`reu_mul`) were caught reactively rather than at intake.
 
 ### 0.3.0 — 2026-05-23
 
