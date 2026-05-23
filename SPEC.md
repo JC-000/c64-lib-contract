@@ -195,6 +195,7 @@ Each §8.x sub-clause declares one bit constant of the form `LIB_SHARED_PRIMITIV
 | Bit | Constant | Primitive | Defined in |
 |---|---|---|---|
 | `$0001` | `LIB_SHARED_PRIMITIVES_SQTAB` | 8×8 quarter-square multiply table | §8.1 |
+| `$0002` | `LIB_SHARED_PRIMITIVES_REU_MUL` | 8×8→16 REU multiplication table (128 KB bank pair) | §8.2 |
 
 Consumer-side composition:
 
@@ -256,6 +257,104 @@ LIB_<X>_SHARED_PRIMITIVES = LIB_SHARED_PRIMITIVES_SQTAB
 
 **Related future promotion.** The multiply body that consumes the table (`mul_8x8` / `ct_mul_8x8`) is duplicated across the same set of libraries. The CT-strict `ct_mul_8x8` variant (introduced by `c64-ChaCha20-Poly1305` v0.3.0, already ported by `c64-nist-curves`) is the right candidate to promote alongside `sqtab` once two or more adopters confirm bit-identical bodies. This clause does not pre-commit to that promotion; it is named here so adopters know which variant to align on if they touch the multiply body during the sqtab migration.
 
+### 8.2 Shared 8×8→16 REU multiplication table (`reu_mul`)
+
+**Failure mode this prevents.** The 128 KB 8×8→16 multiplication table at the heart of every multi-precision field-arithmetic loop is currently built and stashed in REU by both `c64-nist-curves` and `c64-x25519`. At each library's default `--asm-define` setting both lay it down at REU banks `$00`/`$01` with byte-identical row layout (see [JC-000/c64-lib-contract#10](https://github.com/JC-000/c64-lib-contract/issues/10) for the audit). A consumer that links both libraries into a single PRG either silently collides on the same 128 KB or — after `--asm-define`-relocating one of them — wastes 128 KB of REU plus ~3-6 s of cold-boot init on a redundant build of the same table. This clause gives the consumer one placement point so the duplication becomes recoverable from the consumer's cfg.
+
+**Semantics.** 256 rows × 512 bytes occupying two contiguous REU banks (128 KB) starting at the chosen base. Each row is laid out as:
+
+- bytes `[a * 512 .. a * 512 + 256)` — the 256 low bytes of `a × b` for `b ∈ [0..255]`
+- bytes `[a * 512 + 256 .. a * 512 + 512)` — the 256 high bytes of `a × b` for `b ∈ [0..255]`
+
+Rows are addressed `[a * 512]` where `a ∈ [0..255]`. Rows `0..127` live in the first bank (`LIB_SHARED_REU_MUL_BANK`); rows `128..255` live in the second bank (`LIB_SHARED_REU_MUL_BANK + 1`). No row crosses the bank boundary. The implementation MAY generate this from any source — quarter-square recurrence (the common path today), schoolbook `a × b`, or table image — as long as the resulting 128 KB is bitwise identical.
+
+**Placement contract.** The consumer chooses the base bank via the equates below. Each adopting library's canonical header MUST follow this shape:
+
+```asm
+.ifndef LIB_SHARED_REU_MUL_BANK
+    LIB_SHARED_REU_MUL_BANK = $00          ; per-lib default for standalone builds
+.endif
+.ifndef LIB_SHARED_REU_MUL_OFFSET
+    LIB_SHARED_REU_MUL_OFFSET = $0000
+.endif
+LIB_SHARED_REU_MUL_BANKS_USED = (1 .shl LIB_SHARED_REU_MUL_BANK) | (1 .shl (LIB_SHARED_REU_MUL_BANK + 1))
+
+.assert LIB_SHARED_REU_MUL_OFFSET = $0000, error, "reu_mul must start at offset 0 within its bank pair (v0.x.0 constraint)"
+.assert LIB_SHARED_REU_MUL_BANK < $FE,     error, "reu_mul base bank must leave room for the hi-half bank at base+1"
+```
+
+The `.ifndef` guards let each library assemble standalone with its existing default; the consumer overrides via `ca65 --asm-define LIB_SHARED_REU_MUL_BANK=$<bank>` once and all consuming libraries agree. The `.assert`s catch misconfigurations at assemble time:
+
+- `LIB_SHARED_REU_MUL_OFFSET = $0000` — current adopters require start-of-bank for row-stride math. Annotated as a v0.x.0 constraint; loosen only on a justified non-zero need from a future adopter.
+- `LIB_SHARED_REU_MUL_BANK < $FE` — the table claims two contiguous banks (`base` and `base + 1`), so `base = $FF` has no successor.
+
+`LIB_SHARED_REU_MUL_BANKS_USED` is a derived equate that names both claimed banks as a single mask. Consumers compose it into their REU-region `.assert` budget instead of writing `(1 .shl bank) | (1 .shl (bank + 1))` at every callsite; libraries OR it into their own `LIB_<X>_REU_BANKS_USED` (§5) when they consume the canonical primitive.
+
+**ZP and staging-buffer surface.** The canonical init and per-row fetch share two ZP scratch slots and a page-aligned main-RAM staging buffer pair. Both follow the §2 / §3 `.ifndef` pattern so consumers compose without collision:
+
+```asm
+.ifndef LIB_SHARED_REU_MUL_ZP_INIT_A
+    LIB_SHARED_REU_MUL_ZP_INIT_A = $..    ; one byte of ZP scratch (per-lib default)
+.endif
+.ifndef LIB_SHARED_REU_MUL_ZP_INIT_B
+    LIB_SHARED_REU_MUL_ZP_INIT_B = $..    ; one byte of ZP scratch (per-lib default)
+.endif
+.ifndef LIB_SHARED_REU_MUL_STAGE_LO
+    LIB_SHARED_REU_MUL_STAGE_LO = $....   ; 256 B page-aligned, lo half of fetched row
+.endif
+.ifndef LIB_SHARED_REU_MUL_STAGE_HI
+    LIB_SHARED_REU_MUL_STAGE_HI = $....   ; 256 B page-aligned, hi half of fetched row
+.endif
+
+.assert (LIB_SHARED_REU_MUL_STAGE_LO & $00ff) = 0,                              error, "reu_mul stage_lo must be page-aligned"
+.assert (LIB_SHARED_REU_MUL_STAGE_HI & $00ff) = 0,                              error, "reu_mul stage_hi must be page-aligned"
+.assert LIB_SHARED_REU_MUL_STAGE_HI = LIB_SHARED_REU_MUL_STAGE_LO + $0100,      error, "reu_mul stage_hi must follow stage_lo by $0100"
+```
+
+Page alignment and adjacent placement of the two stage buffers are required by the fetch primitive's 4×-unrolled `abs,y` accumulator loop. Each adopter's existing `mul_dma_lo` / `mul_dma_hi` labels remain exported for backwards compatibility; the canonical names alias them.
+
+**Init.** The canonical init entry point is `reu_mul_tables_init`. It populates banks `LIB_SHARED_REU_MUL_BANK` and `LIB_SHARED_REU_MUL_BANK + 1` and nothing else. The contract is **safe to call twice**: a second call produces the same final REU state with the same observable side effects (the full ~3 s of init work runs twice). The contract does NOT promise no-op on re-call — adding an init-done flag would be an additive change deferred to a future minor bump if a consumer needs it. "Safe to call twice" is the load-bearing reading; do not infer "idempotent" in the no-op sense from this clause.
+
+Libraries that ship adjacent caches keyed off the canonical table — e.g., `c64-x25519`'s pre-doubled 8f+8g rows in banks `+3..+5`, generated only under the build-time `SQR_DMA_K > 0` profile — generate those caches in a library-private init invoked *after* `reu_mul_tables_init` returns. The canonical init MUST NOT touch those banks, and the library-private init MUST stay gated on its existing build-time profile flag. This preserves the lean-profile reclamation those flags exist to provide (e.g., `lib-x25519-1764` with `SQR_DMA_K = 0` reclaims ~600 ms init and 3 REU banks).
+
+**Fetch.** The canonical per-row fetch entry point is `reu_fetch_mul_row`. Calling convention: register `A = a` (row index); on return, the 512 bytes of row `a` are written to `LIB_SHARED_REU_MUL_STAGE_LO` / `LIB_SHARED_REU_MUL_STAGE_HI`. Per-call REU register touches: hi address byte (`$DF05`), bank (`$DF06`), command (`$DF01`) — three writes, ~20 cycles. The fetch MUST re-establish `reu_reu_lo` (`$DF04`) and `reu_addr_ctrl` (`$DF0A`) to `$00` defensively on entry to defend against caller residue (issue [JC-000/c64-x25519#33](https://github.com/JC-000/c64-x25519/issues/33)-class).
+
+**Migration shape.** Each adopting library MAY keep its existing per-lib `reu_mul_init` exported for backwards compatibility. Under `.ifdef SHARED_REU_MUL_INIT`, the library's own un-doubled-banks init body is gated out and the canonical `reu_mul_tables_init` takes over. Library-private init for adjacent caches (above) stays under its own build-time gate and is invoked alongside the canonical init from the library's existing entry. A consumer flips libraries to the shared init one at a time without an atomic cross-repo cutover.
+
+**Bit allocation.** This primitive owns bit `$0002`:
+
+```asm
+LIB_SHARED_PRIMITIVES_REU_MUL = $0002
+```
+
+Adopters OR it into their `LIB_<X>_SHARED_PRIMITIVES` manifest equate (§5) and the existing §8.0 `.assert` catches accidental cross-library double-ownership.
+
+**§8.0 catch-loop registry.** Adopters consuming this primitive MUST emit, in addition to the manifest-equate bit above, one §8.0 catch-loop macro invocation:
+
+```ca65
+LIB_PRECALC_TABLE "reu_mul", 131072, PRECALC_REGION_REU, PRECALC_SHARED_YES
+```
+
+The string `"reu_mul"` is **normative**; adopters MUST NOT substitute a library-prefixed variant (e.g., `"nistcurves_reu_mul"` or `"x25519_reu_mul"`). The cross-adopter audit `od65 --dump-exports build/*.o | grep LIB_PRECALC_reu_mul_SIZE` depends on every adopter exporting the same `LIB_PRECALC_reu_mul_*` symbol family. (`od65` is the cc65 object-file inspector; ca65 `.o` files are not in ELF/Mach-O format so standard `nm` cannot read them. Symbol case is preserved from the macro argument — see §8.0.) Size (`131072`) and region (`PRECALC_REGION_REU`) are also normative — they are invariants of the shared shape — only placement (the `LIB_SHARED_REU_MUL_BANK` equate above) is consumer-chosen.
+
+**Worked consumer layout (TLS 1.3 stack).** A consumer that links `c64-nist-curves` (consumes §8.2 plus its own Lim-Lee comb at a private REU bank), `c64-x25519` (consumes §8.2 plus its own pre-doubled tables at private REU banks under `SQR_DMA_K > 0`), and `c64-ChaCha20-Poly1305` (consumes §8.1 sqtab only, no §8.2) might cfg as follows:
+
+```asm
+LIB_SHARED_REU_MUL_BANK         = $00       ; banks $00 + $01 — shared by nist-curves and x25519
+LIB_NISTCURVES_REU_BANK_COMB    = $02       ; bank $02 — Lim-Lee comb (nist-curves private)
+X25519_REU_BANK_DOUBLED         = $03       ; banks $03..$05 — x25519 pre-doubled (private, K>0)
+LIB_SHARED_SQTAB_BASE           = $C000     ; main-RAM sqtab (chacha + nist-curves + x25519 all consume)
+```
+
+Under that cfg the three adopters' `LIB_<X>_REU_BANKS_USED` manifest equates resolve without overlap; the §8.0 `LIB_<X>_SHARED_PRIMITIVES` `.assert` catches any accidental double-ownership of bit `$0001` or `$0002`. Banks `$06` and `$07` remain free for the next §8.x candidate (e.g., a shared SHA message schedule cache) or for consumer-private use.
+
+**Related future promotions.** Two follow-ups carry across from this clause:
+
+- `mul_8x8` / `ct_mul_8x8` — the multiply body that consumes the table. Promotion is gated on a cross-adopter `ct_mul_brute_check` round-trip confirming bit-identical SMC bodies between `c64-nist-curves` and `c64-x25519`; until that round-trip lands, each adopter ships its own copy. The §8.1 forward-look already names this candidate; this clause re-affirms it with the stronger evidence bar. Tracked in [JC-000/c64-lib-contract#14](https://github.com/JC-000/c64-lib-contract/issues/14).
+- `c64-x25519`'s `reu_fetch_doubled_row` — structurally identical to `reu_fetch_mul_row` with a different bank base. A SMC-parameterised shared fetch could replace it for a small code-size win, deferred until the §8.2 baseline ships across both adopters. Tracked in [JC-000/c64-lib-contract#15](https://github.com/JC-000/c64-lib-contract/issues/15).
+
+This clause does not pre-commit to either promotion; the tracking issues stay open until the evidence gates (#14: cross-adopter brute-check round-trip; #15: §8.2 baseline shipped) are satisfied.
+
 ## 9. Compatibility timeline
 
 - **2026-05-20 — v0.1.0 (this draft).** Contract is published; adopters land iteratively. Tracking issues filed against each adopter library.
@@ -272,6 +371,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.3.0 — 2026-05-23
+
+Additive: new §8.2 "Shared 8×8→16 REU multiplication table (`reu_mul`)" covering the 128 KB `(a, b) → a × b` mul tables duplicated today between `c64-nist-curves` and `c64-x25519`. Introduces consumer-placement equates `LIB_SHARED_REU_MUL_BANK` and `LIB_SHARED_REU_MUL_OFFSET` (with the latter pinned to `$0000` as a v0.x.0 constraint), a derived `LIB_SHARED_REU_MUL_BANKS_USED` equate so the §8.0 double-ownership `.assert` composes against two-bank claims, a ZP and page-aligned staging-buffer contract following the §2 / §3 `.ifndef` pattern, canonical `reu_mul_tables_init` and `reu_fetch_mul_row` entry points with "safe to call twice" semantics (explicitly *not* "idempotent" in the no-op sense), an explicit non-collapse clause preserving library-private adjacent caches under existing build-time gates (`c64-x25519`'s `SQR_DMA_K > 0` doubled banks `+3..+5`), a `SHARED_REU_MUL_INIT` migration switch, bit `$0002` (`LIB_SHARED_PRIMITIVES_REU_MUL`) in the §8.0 allocation table, and a worked TLS 1.3 stack layout example demonstrating four adopters composing under §8.0 + §8.1 + §8.2. No breaking changes — adopters that do not consume §8.2 are unaffected. Motivated by [JC-000/c64-lib-contract#10](https://github.com/JC-000/c64-lib-contract/issues/10).
 
 ### 0.2.0 — 2026-05-20
 
