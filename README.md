@@ -12,9 +12,10 @@ This repo specifies the contract that lets libraries publish their version, ZP s
 
 ## What's in here
 
-- [**SPEC.md**](SPEC.md) — the contract itself: version equates, `.exportzp` ZP slots, REU bank symbols, segment naming, aggregate manifest equates, build-target conventions.
+- [**SPEC.md**](SPEC.md) — the contract itself: version equates, `.exportzp` ZP slots, REU bank symbols, segment naming, aggregate manifest equates, build-target conventions, shared-primitive promotion clauses.
 - [**adopters.md**](adopters.md) — libraries that follow (or are in the process of following) the contract, with tracking-issue links per section.
 - [**consumers.md**](consumers.md) — downstream projects that rely on the contract.
+- [**precalc_table.inc**](precalc_table.inc) + [**examples/precalc_table_smoke.s**](examples/precalc_table_smoke.s) + [**Makefile**](Makefile) — canonical ca65 source for the SPEC §8.0 catch-loop `LIB_PRECALC_TABLE` macro, smoke-tested via `make verify` (requires `ca65` from the cc65 toolchain).
 
 ## How to participate
 
