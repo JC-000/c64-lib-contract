@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.2.0 (2026-05-20)
+**Version:** 0.3.2 (2026-06-15)
 **Status:** Draft — under joint review by adopters and consumers.
 
 ## 0. Scope and audience
@@ -290,16 +290,26 @@ LIB_PRECALC_TABLE "lim_lee_comb", 24576,  PRECALC_REGION_REU,    PRECALC_SHARED_
 LIB_PRECALC_TABLE "sha384_k",     640,    PRECALC_REGION_RODATA, PRECALC_SHARED_NO
 ```
 
-**Consumer-side composition** (optional, for the consumer cfg that wants to cross-check at link time):
+**Consumer-side composition** (optional, for the consumer that wants to cross-check a composed library's shape). The canonical cross-check reads the exported equates out of the post-build object via `od65 --dump-exports` — the same tool §8.0 already uses for the adopter-intake audit above — and greps for the `LIB_PRECALC_<name>_*` symbol family:
 
-```asm
-.import LIB_PRECALC_reu_mul_SHARED
-.import LIB_PRECALC_reu_mul_SIZE
-.assert LIB_PRECALC_reu_mul_SHARED = PRECALC_SHARED_YES, error, "if this lib reports reu_mul, it MUST claim sharing"
-.assert LIB_PRECALC_reu_mul_SIZE   = 131072,             error, "reu_mul size mismatch — bit-identical shape required for §8.2"
+```sh
+od65 --dump-exports build/*.o | grep LIB_PRECALC_reu_mul
 ```
 
-Note the symbol case: `LIB_PRECALC_reu_mul_*` with lower-case middle component. The macro preserves the literal case of the `name` argument since ca65 has no built-in toupper; the normative §8.x canonical names use lower_snake_case so adopters and consumers grep on a single case convention.
+This reports `LIB_PRECALC_reu_mul_SIZE`, `_REGION`, and `_SHARED` with their exported values for any table size, including the 128 KB `reu_mul` and the 192 KB `reu_mul_doubled`. A consumer build script asserts the values it expects (`_SHARED = 1`, `_SIZE = 131072`) against this dump.
+
+> **Address-size limit (normative).** On the ca65 6502 target an *assemble-time* cross-check that `.import`s `LIB_PRECALC_<name>_SIZE` into a second translation unit and `.assert`s on it only works for tables **≤ 65 535 B**. ca65's `.import` accepts only the `: zp` (8-bit) and `: abs` (16-bit) address-size hints — there is no `: far` (24-bit) form — so importing the `_SIZE` of a larger table (e.g. `reu_mul` = 131072 B) raises `Range error (131072 not in [-32768..65535])` at the consumer. The producer-side `.export LIB_PRECALC_<name>_SIZE` equate is unaffected (ca65 `.export` accepts an absolute value of any width up to 32 bits — see the macro note in `precalc_table.inc`); only the *consuming* `.import` is constrained. For tables that fit, the assemble-time form is available:
+>
+> ```asm
+> ; Assemble-time cross-check — VALID ONLY for tables ≤ 65 535 B.
+> ; For larger tables (reu_mul, reu_mul_doubled) use the od65 dump above.
+> .import LIB_PRECALC_sqtab_SHARED
+> .import LIB_PRECALC_sqtab_SIZE
+> .assert LIB_PRECALC_sqtab_SHARED = PRECALC_SHARED_YES, error, "if this lib reports sqtab, it MUST claim sharing"
+> .assert LIB_PRECALC_sqtab_SIZE   = 1024,               error, "sqtab size mismatch — bit-identical shape required for §8.1"
+> ```
+
+Note the symbol case: `LIB_PRECALC_reu_mul_*` / `LIB_PRECALC_sqtab_*` with lower-case middle component. The macro preserves the literal case of the `name` argument since ca65 has no built-in toupper; the normative §8.x canonical names use lower_snake_case so adopters and consumers grep on a single case convention.
 
 **Audit triggers.** A precalc table flagged `PRECALC_SHARED_YES` by two or more adopters at byte-identical size + region is a §8.x promotion candidate. The audit step runs:
 
@@ -481,6 +491,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.3.2 — 2026-06-15
+
+Doc-only: reworked the §8.0 "Consumer-side composition" example to cross-check a composed library's precalc tables via `od65 --dump-exports build/*.o | grep LIB_PRECALC_<name>` — the canonical §8.0 audit tool, which works for any table size — instead of the previous `.import LIB_PRECALC_<name>_SIZE` + `.assert` form. Added a normative address-size note: on the ca65 6502 target the assemble-time `.import` + `.assert` cross-check of `LIB_PRECALC_<name>_SIZE` is valid only for tables ≤ 65 535 B, because `.import` has no `: far` (24-bit) hint — only `: zp` / `: abs` — so importing the `_SIZE` of a larger table (e.g. `reu_mul` = 131072 B) raises `Range error (131072 not in [-32768..65535])`. The producer-side `.export LIB_PRECALC_<name>_SIZE` equate is unaffected and the `LIB_PRECALC_TABLE` macro emits the same equates as before; this is an example/clarification fix only. The retained assemble-time snippet now uses the ≤ 64 KB `sqtab` table. No contract change — no symbol, macro, or build-target semantics changed. Resolves [JC-000/c64-lib-contract#18](https://github.com/JC-000/c64-lib-contract/issues/18), found during the c64-x25519 §8.0 step-6 adoption.
 
 ### 0.3.1 — 2026-05-23
 
