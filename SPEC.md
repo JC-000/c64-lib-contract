@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.3.2 (2026-06-15)
+**Version:** 0.4.0 (2026-06-20)
 **Status:** Draft — under joint review by adopters and consumers.
 
 ## 0. Scope and audience
@@ -186,7 +186,7 @@ While the contract is in v0.x (pre-1.0), breaking changes happen freely with MIN
 
 Some primitives are reimplemented identically across multiple sibling libraries. When a consumer links several of those libraries into the same PRG, each one defines its own copy of the table at its own address, wasting resident RAM and boot cycles, and — more importantly — making the placement decision per-library rather than per-consumer. This section names primitives where the duplication has been confirmed across at least two adopters, fixes the *shape* every implementation must agree on, and leaves the *address* to the consumer via the `--asm-define` override mechanism already established in §2 and §3.
 
-A primitive listed here is opt-in per library: an adopter MAY continue to ship its own private copy until it migrates. Once migrated, the library reflects ownership of the primitive in its `LIB_<X>_SHARED_PRIMITIVES` bitmask manifest equate (§5) so consumers can detect double-ownership at assemble time.
+A primitive listed here is opt-in per library: an adopter MAY continue to ship its own private copy until it migrates. Once migrated, the library reflects ownership of the primitive in its `LIB_<X>_SHARED_PRIMITIVES` bitmask manifest equate (§5) — *conditionally*, so a build that defers the primitive to a canonical provider drops the bit (§8.0) — letting consumers detect double-ownership at assemble time.
 
 ### 8.0 Bit allocation for `LIB_<X>_SHARED_PRIMITIVES`
 
@@ -196,16 +196,42 @@ Each §8.x sub-clause declares one bit constant of the form `LIB_SHARED_PRIMITIV
 |---|---|---|---|
 | `$0001` | `LIB_SHARED_PRIMITIVES_SQTAB` | 8×8 quarter-square multiply table | §8.1 |
 | `$0002` | `LIB_SHARED_PRIMITIVES_REU_MUL` | 8×8→16 REU multiplication table (128 KB bank pair) | §8.2 |
+| `$0004` | `LIB_SHARED_PRIMITIVES_CT_MUL_8X8` | constant-time 8×8→16 multiply body | §8.3 |
 
-Consumer-side composition:
+**Consumer-side composition.** Each adopter's `LIB_<X>_SHARED_PRIMITIVES` mask reflects the primitives it **owns in this build configuration**: a primitive's bit is included **iff this build does NOT defer that primitive** via its per-primitive migration switch (the `SHARED_*` / `SHARED_*_INIT` define from the primitive's §8.x clause). A library that defers a shared primitive to a canonical provider (built with that switch defined) drops the corresponding bit, so two libraries linked into the same PRG that share a primitive end up with **disjoint** masks — exactly one keeps the bit. A consumer then asserts disjointness:
 
 ```asm
 .import LIB_NISTCURVES_SHARED_PRIMITIVES
 .import LIB_CHACHA20_POLY1305_SHARED_PRIMITIVES
-.assert (LIB_NISTCURVES_SHARED_PRIMITIVES .and LIB_CHACHA20_POLY1305_SHARED_PRIMITIVES) = 0, error, "shared-primitive double-ownership"
+.assert (LIB_NISTCURVES_SHARED_PRIMITIVES .and LIB_CHACHA20_POLY1305_SHARED_PRIMITIVES) = 0, error, "shared-primitive double-ownership — exactly one provider must own each shared primitive; the other(s) must build with that primitive's SHARED_* switch defined"
 ```
 
-Two libraries linked into the same PRG must not both claim ownership of the same primitive; whichever lib's standalone build defined the canonical labels first owns them at integration time, the others' definitions are gated out per the per-primitive migration switch.
+**Per-primitive deferral-switch mapping** (the define that, when present, zeroes the bit):
+
+| Bit | Constant | Deferral switch |
+|---|---|---|
+| `$0001` | `LIB_SHARED_PRIMITIVES_SQTAB` | `SHARED_SQTAB_INIT` |
+| `$0002` | `LIB_SHARED_PRIMITIVES_REU_MUL` | `SHARED_REU_MUL_INIT` |
+| `$0004` | `LIB_SHARED_PRIMITIVES_CT_MUL_8X8` | `SHARED_CT_MUL_8X8` |
+
+**Mask construction (required form).** Each adopter MUST build its mask so a defined switch drops the bit — do **not** OR the bit constants unconditionally. An unconditional mask makes the disjointness assert above unsatisfiable for any legitimately-shared primitive (two sharers both keep the bit), the defect fixed in v0.4.0 (see [#21](https://github.com/JC-000/c64-lib-contract/issues/21)):
+
+```asm
+.ifdef SHARED_SQTAB_INIT
+  _OWN_SQTAB   = 0
+.else
+  _OWN_SQTAB   = LIB_SHARED_PRIMITIVES_SQTAB
+.endif
+.ifdef SHARED_CT_MUL_8X8
+  _OWN_CT_MUL  = 0
+.else
+  _OWN_CT_MUL  = LIB_SHARED_PRIMITIVES_CT_MUL_8X8
+.endif
+; ... one .ifdef/.else block per primitive THIS library consumes ...
+LIB_<X>_SHARED_PRIMITIVES = _OWN_SQTAB | _OWN_CT_MUL    ; OR only the primitives this lib uses
+```
+
+The bit therefore means "owned in this build config": a standalone build (no switches defined) claims every primitive it consumes; an integrated build defers the shared ones it does not provide, and its bits drop out so the consumer disjointness assert holds.
 
 #### Catch loop: enumeration at adopter intake
 
@@ -375,7 +401,7 @@ LIB_PRECALC_TABLE "sqtab", 1024, PRECALC_REGION_RAM, PRECALC_SHARED_YES
 
 The string `"sqtab"` is **normative**; adopters MUST NOT substitute a library-prefixed variant (e.g., `"nistcurves_sqtab"` or `"chacha_sqtab"`). The cross-adopter audit `od65 --dump-exports build/*.o | grep LIB_PRECALC_sqtab_SIZE` depends on every adopter exporting the same `LIB_PRECALC_sqtab_*` symbol family. Size (`1024`) and region (`PRECALC_REGION_RAM`) are also normative — they are invariants of the shared shape — only placement (the `LIB_SHARED_SQTAB_BASE` equate above) is consumer-chosen.
 
-**Related future promotion.** The multiply body that consumes the table (`mul_8x8` / `ct_mul_8x8`) is duplicated across the same set of libraries. The CT-strict `ct_mul_8x8` variant (introduced by `c64-ChaCha20-Poly1305` v0.3.0, already ported by `c64-nist-curves`) is the right candidate to promote alongside `sqtab` once two or more adopters confirm bit-identical bodies. This clause does not pre-commit to that promotion; it is named here so adopters know which variant to align on if they touch the multiply body during the sqtab migration.
+**Related future promotion.** The multiply body that consumes the table (`mul_8x8` / `ct_mul_8x8`) is duplicated across the same set of libraries. The CT-strict `ct_mul_8x8` variant (introduced by `c64-ChaCha20-Poly1305` v0.3.0, already ported by `c64-nist-curves`) is the right candidate to promote alongside `sqtab` once two or more adopters confirm bit-identical bodies. This clause does not pre-commit to that promotion; it is named here so adopters know which variant to align on if they touch the multiply body during the sqtab migration. **(Resolved in v0.4.0:** `ct_mul_8x8` was promoted to §8.3, bit `$0004`, once all three adopters confirmed byte-identical bodies via the cross-adopter `ct_mul_brute_check` gate.**)**
 
 ### 8.2 Shared 8×8→16 REU multiplication table (`reu_mul`)
 
@@ -470,10 +496,32 @@ Under that cfg the three adopters' `LIB_<X>_REU_BANKS_USED` manifest equates res
 
 **Related future promotions.** Two follow-ups carry across from this clause:
 
-- `mul_8x8` / `ct_mul_8x8` — the multiply body that consumes the table. Promotion is gated on a cross-adopter `ct_mul_brute_check` round-trip confirming bit-identical SMC bodies between `c64-nist-curves` and `c64-x25519`; until that round-trip lands, each adopter ships its own copy. The §8.1 forward-look already names this candidate; this clause re-affirms it with the stronger evidence bar. Tracked in [JC-000/c64-lib-contract#14](https://github.com/JC-000/c64-lib-contract/issues/14).
+- `mul_8x8` / `ct_mul_8x8` — the multiply body that consumes the table. **Resolved in v0.4.0: promoted to §8.3 (bit `$0004`)** after the cross-adopter `ct_mul_brute_check` round-trip confirmed byte-identical bodies across all three adopters. Was tracked in [JC-000/c64-lib-contract#14](https://github.com/JC-000/c64-lib-contract/issues/14).
 - `c64-x25519`'s `reu_fetch_doubled_row` — structurally identical to `reu_fetch_mul_row` with a different bank base. A SMC-parameterised shared fetch could replace it for a small code-size win, deferred until the §8.2 baseline ships across both adopters. Tracked in [JC-000/c64-lib-contract#15](https://github.com/JC-000/c64-lib-contract/issues/15).
 
-This clause does not pre-commit to either promotion; the tracking issues stay open until the evidence gates (#14: cross-adopter brute-check round-trip; #15: §8.2 baseline shipped) are satisfied.
+#14's evidence gate (cross-adopter brute-check round-trip) is now satisfied and `ct_mul_8x8` is promoted in §8.3 (v0.4.0). The `reu_fetch_doubled_row` follow-up (#15) stays open until its §8.2-baseline gate is acted on.
+
+### 8.3 Shared constant-time 8×8→16 multiply body (`ct_mul_8x8`)
+
+**Failure mode this prevents.** The branchless, SMC-dispatched quarter-square multiply body that reads the §8.1 `sqtab` is reimplemented in every library that does field arithmetic. A pre-S12 ancestor of this body carried two secret-dependent branches; the constant-time rewrite (`c64-ChaCha20-Poly1305` v0.3.0 `ct_mul_8x8`) was then ported divergently into siblings (different calling conventions, block orderings, and scratch placement), so a CT-relevant edit to one copy could silently leave the others on a timing-variable shape. This clause pins one canonical body so the constant-time property is defined once and verified mechanically across adopters.
+
+**Semantics.** A constant-time 8-bit × 8-bit → 16-bit multiply computing `a*b = t(a+b) - t(|a-b|)` over the §8.1 `sqtab` tables, with no secret-dependent branches and cycle-stable `abs,x` indexed loads (the invariant the variant exists to preserve). Entry: `Y = b`; the multiplier `a` is baked into the two `adc #imm` SMC immediate sites by the caller before the inner loop. The 16-bit product is returned in the library's product scratch (`poly_prod_lo` / `poly_prod_hi`). This clause **depends on §8.1** — the body reads `sqtab_lo` / `sqtab_hi` and inherits their page-alignment `.assert`s.
+
+**Shape contract (pinned by gate, not by `.assert`).** Unlike §8.1 / §8.2 there is no placement equate — this is a code body, not a placed table. The canonical shape is the 59-byte `ct_mul_8x8` body in `c64-ChaCha20-Poly1305/src/lib/poly1305_lib.s`. Adopters MUST be **byte-identical** to it. This is enforced by the cross-adopter `tools/ct_mul_brute_check.py` ratchet — opcode-byte equality across all adopters plus a 65 536-case functional brute-check — which MUST return exit 0 before any body change lands. As of v0.4.0 all three adopters (`c64-ChaCha20-Poly1305`, `c64-nist-curves`, `c64-x25519`) are byte-identical (59 B, SHA-256 `3ed9025b…`, 65536/65536 functional).
+
+**Canonical entry.** `ct_mul_8x8`. Adopters whose historical name is `mul_8x8` keep it exported as a back-compat alias of `ct_mul_8x8` (same address).
+
+**Migration shape.** Each adopting library gates its own copy under `.ifdef SHARED_CT_MUL_8X8`. When a consumer defines that switch, the library's private body is gated out and the canonical `ct_mul_8x8` provided by the designated owner takes over. This mirrors the §8.1 `SHARED_SQTAB_INIT` switch and lets a consumer flip libraries one at a time without an atomic cross-repo cutover.
+
+**Bit allocation.** This primitive owns bit `$0004`:
+
+```asm
+LIB_SHARED_PRIMITIVES_CT_MUL_8X8 = $0004
+```
+
+Adopters include this bit in their `LIB_<X>_SHARED_PRIMITIVES` manifest equate using the **conditional** mask construction of §8.0 — the bit is dropped when this build defines `SHARED_CT_MUL_8X8` (i.e. defers the body to a provider). The `$0004` → `SHARED_CT_MUL_8X8` mapping is registered in the §8.0 deferral-switch table.
+
+**No §8.0 catch-loop registry entry.** §8.0's `LIB_PRECALC_TABLE` enumeration covers precalculated *tables*; `ct_mul_8x8` is a code body, not a table, so it takes **no** `LIB_PRECALC_TABLE` invocation. Its data dependency — the §8.1 `sqtab` table — is already enumerated under §8.1.
 
 ## 9. Compatibility timeline
 
@@ -491,6 +539,14 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.4.0 — 2026-06-20
+
+Additive: new §8.3 "Shared constant-time 8×8→16 multiply body (`ct_mul_8x8`)" promoting the branchless SMC-dispatched quarter-square multiply body (canonical: `c64-ChaCha20-Poly1305` `ct_mul_8x8`, 59 B) to a shared primitive. Allocates bit `$0004` (`LIB_SHARED_PRIMITIVES_CT_MUL_8X8`) in the §8.0 table, adds an `.ifdef SHARED_CT_MUL_8X8` migration switch, and pins the body shape by the cross-adopter `tools/ct_mul_brute_check.py` byte-identity ratchet (exit 0 across all three adopters as of this release: 59 B, SHA `3ed9025b…`, 65536/65536 functional). Depends on §8.1 `sqtab`; takes no §8.0 `LIB_PRECALC_TABLE` entry (it is a code body, not a table). Resolves [JC-000/c64-lib-contract#14](https://github.com/JC-000/c64-lib-contract/issues/14).
+
+Fix (§8.0): the `LIB_<X>_SHARED_PRIMITIVES` mask is now **conditional** on each primitive's deferral switch rather than an unconditional OR of bit constants. A bit is included iff this build does *not* define that primitive's `SHARED_*` / `SHARED_*_INIT` switch, so two libraries that legitimately share a primitive produce disjoint masks and the consumer `.assert (A .and B) = 0` holds — the previous unconditional form made that assert unsatisfiable for any shared primitive. Adds the per-bit → deferral-switch mapping table and the required conditional mask-construction form. Resolves [JC-000/c64-lib-contract#21](https://github.com/JC-000/c64-lib-contract/issues/21). Adopters migrate their mask equates to the conditional form in follow-up PRs; bit values are unchanged (append-only preserved).
+
+MINOR bump: additive §8.3 plus a corrected §8.0 mask form that is backward-compatible in bit values. Adopters that do not consume §8.3 are unaffected; adopters that shipped an unconditional mask should migrate to the conditional form to make the §8.0 disjointness assert usable.
 
 ### 0.3.2 — 2026-06-15
 
