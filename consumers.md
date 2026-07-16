@@ -7,7 +7,7 @@ This page tracks downstream projects that rely on the [c64-lib-contract](SPEC.md
 | Project | Status | Lead doc |
 |---|---|---|
 | [c64-https](https://github.com/JC-000/c64-https) | Drafting integration plan | [docs/library-ingestion-architecture.md](https://github.com/JC-000/c64-https/blob/master/docs/library-ingestion-architecture.md) *(URL becomes stable once the doc lands on master; presently uncommitted local file. Plan is dated 2026-05-20.)* |
-| [c64-wireguard](https://github.com/JC-000/c64-wireguard) | Drafting integration plan | *(link tbd — see c64-wireguard's docs/ tree; issues [c64-x25519#43](https://github.com/JC-000/c64-x25519/issues/43), [#44](https://github.com/JC-000/c64-x25519/issues/44), [c64-ChaCha20-Poly1305#26](https://github.com/JC-000/c64-ChaCha20-Poly1305/issues/26) reflect their parallel restructuring work)* |
+| [c64-wireguard](https://github.com/JC-000/c64-wireguard) | Siblings vendored behind opt-in toggles (default OFF) | [docs/library-ingestion-architecture.md](https://github.com/JC-000/c64-wireguard/blob/65b049871640b1ba8452a872c4285c99a81d5f33/docs/library-ingestion-architecture.md) | |
 
 ## How to add your project
 
