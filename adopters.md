@@ -15,7 +15,7 @@ This page tracks which libraries adopt (or are in the process of adopting) the [
 
 ### Bootstrap-era issue summary
 
-All open adopter-side tracking issues, filed 2026-05-20:
+All adopter-side tracking issues filed 2026-05-20 as the bootstrap seed — every one is now closed (verified 2026-07-18; each maps to a ✅ shipped cell in the status table above):
 
 - **c64-nist-curves**: [#40](https://github.com/JC-000/c64-nist-curves/issues/40) (minimal archives), [#41](https://github.com/JC-000/c64-nist-curves/issues/41) (segment rename), [#42](https://github.com/JC-000/c64-nist-curves/issues/42) (manifest equates)
 - **c64-polyval**: [#12](https://github.com/JC-000/c64-polyval/issues/12) (`LIB_VERSION_*`), [#13](https://github.com/JC-000/c64-polyval/issues/13) (`.exportzp` header), [#14](https://github.com/JC-000/c64-polyval/issues/14) (segment rename), [#15](https://github.com/JC-000/c64-polyval/issues/15) (manifest equates), [#16](https://github.com/JC-000/c64-polyval/issues/16) (archive build targets)
