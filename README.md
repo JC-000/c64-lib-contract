@@ -2,13 +2,13 @@
 
 A cross-consumer ABI / memory-manifest contract for Commodore 64 cryptographic libraries.
 
-C64 crypto libraries (`c64-nist-curves`, `c64-x25519`, `c64-ChaCha20-Poly1305`, future `c64-aes256-ecdsa`, ...) are consumed by multiple downstream projects (`c64-https`, `c64-wireguard`, future C64 TLS / IPsec / VPN clients). Without a shared contract, every consumer ends up patching library sources at integration time to fit its own memory layout, ZP, and REU usage — and every library tag bump forces consumer-side cfg surgery.
+C64 crypto libraries (`c64-nist-curves`, `c64-x25519`, `c64-ChaCha20-Poly1305`, `c64-polyval`, future `c64-aes256-ecdsa`, ...) are consumed by multiple downstream projects (`c64-https`, `c64-wireguard`, future C64 TLS / IPsec / VPN clients). Without a shared contract, every consumer ends up patching library sources at integration time to fit its own memory layout, ZP, and REU usage — and every library tag bump forces consumer-side cfg surgery.
 
 This repo specifies the contract that lets libraries publish their version, ZP slots, REU layout, segment names, and minimal-archive build targets as code, so consumers can ingest cleanly. Long-term goal: a library tag push automatically triggers a downstream `build → test → open PR` pipeline without any human cfg work.
 
 ## Status
 
-**Bootstrap (2026-05-20).** Contract is v0.1.0 draft. First adopters are landing their pieces — see [adopters.md](adopters.md). Will declare v1.0 once all current adopters complete the six sections of [SPEC.md](SPEC.md).
+**v0.4.0 draft (2026-06-20).** The contract has grown from its bootstrap six sections to also cover §7 semver expectations and §8 shared primitives — §8.0 precalc-table enumeration, §8.1 `sqtab`, §8.2 `reu_mul`, and §8.3 `ct_mul_8x8`. All four current adopters (`c64-nist-curves`, `c64-polyval`, `c64-x25519`, `c64-ChaCha20-Poly1305`) have shipped the core sections plus the shared-primitive clauses that apply to them — see [adopters.md](adopters.md) for the per-section status table and [SPEC.md §12](SPEC.md#12-changelog) for the version history. Will declare v1.0 once the current adopters have completed every applicable section and the shared-primitive migration has settled.
 
 ## What's in here
 
