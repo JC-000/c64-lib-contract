@@ -6,7 +6,7 @@ This page tracks downstream projects that rely on the [c64-lib-contract](SPEC.md
 
 | Project | Status | Lead doc |
 |---|---|---|
-| [c64-https](https://github.com/JC-000/c64-https) | Drafting integration plan | [docs/library-ingestion-architecture.md](https://github.com/JC-000/c64-https/blob/master/docs/library-ingestion-architecture.md) *(URL becomes stable once the doc lands on master; presently uncommitted local file. Plan is dated 2026-05-20.)* |
+| [c64-https](https://github.com/JC-000/c64-https) | Integrated — contract alignment merged ([PR #55](https://github.com/JC-000/c64-https/pull/55), 2026-05-21: `libs/nistcurves` v0.3.0 + `libs/x25519` v0.6.0) | [docs/library-ingestion-architecture.md](https://github.com/JC-000/c64-https/blob/master/docs/library-ingestion-architecture.md) |
 | [c64-wireguard](https://github.com/JC-000/c64-wireguard) | Siblings vendored behind opt-in toggles (default OFF) | [docs/library-ingestion-architecture.md](https://github.com/JC-000/c64-wireguard/blob/65b049871640b1ba8452a872c4285c99a81d5f33/docs/library-ingestion-architecture.md) | |
 
 ## How to add your project

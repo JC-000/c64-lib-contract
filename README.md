@@ -8,7 +8,7 @@ This repo specifies the contract that lets libraries publish their version, ZP s
 
 ## Status
 
-**v0.4.0 draft (2026-06-20).** The contract has grown from its bootstrap six sections to also cover §7 semver expectations and §8 shared primitives — §8.0 precalc-table enumeration, §8.1 `sqtab`, §8.2 `reu_mul`, and §8.3 `ct_mul_8x8`. All four current adopters (`c64-nist-curves`, `c64-polyval`, `c64-x25519`, `c64-ChaCha20-Poly1305`) have shipped the core sections plus the shared-primitive clauses that apply to them — see [adopters.md](adopters.md) for the per-section status table and [SPEC.md §12](SPEC.md#12-changelog) for the version history. Will declare v1.0 once the current adopters have completed every applicable section and the shared-primitive migration has settled.
+**v0.4.1 draft (2026-07-18).** The contract has grown from its bootstrap six sections to also cover §7 semver expectations and §8 shared primitives — §8.0 precalc-table enumeration, §8.1 `sqtab`, §8.2 `reu_mul`, and §8.3 `ct_mul_8x8`. All four current adopters (`c64-nist-curves`, `c64-polyval`, `c64-x25519`, `c64-ChaCha20-Poly1305`) have shipped the core sections plus the shared-primitive clauses that apply to them, verified cell-by-cell against adopter source as of 2026-07-18 — see [adopters.md](adopters.md) for the per-section status table and [SPEC.md §12](SPEC.md#12-changelog) for the version history. Will declare v1.0 once the current adopters have completed every applicable section and the shared-primitive migration has settled.
 
 ## What's in here
 
