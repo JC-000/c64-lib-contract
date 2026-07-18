@@ -497,9 +497,9 @@ Under that cfg the three adopters' `LIB_<X>_REU_BANKS_USED` manifest equates res
 **Related future promotions.** Two follow-ups carry across from this clause:
 
 - `mul_8x8` / `ct_mul_8x8` — the multiply body that consumes the table. **Resolved in v0.4.0: promoted to §8.3 (bit `$0004`)** after the cross-adopter `ct_mul_brute_check` round-trip confirmed byte-identical bodies across all three adopters. Was tracked in [JC-000/c64-lib-contract#14](https://github.com/JC-000/c64-lib-contract/issues/14).
-- `c64-x25519`'s `reu_fetch_doubled_row` — structurally identical to `reu_fetch_mul_row` with a different bank base. A SMC-parameterised shared fetch could replace it for a small code-size win, deferred until the §8.2 baseline ships across both adopters. Tracked in [JC-000/c64-lib-contract#15](https://github.com/JC-000/c64-lib-contract/issues/15).
+- `c64-x25519`'s `reu_fetch_doubled_row` — structurally identical to `reu_fetch_mul_row` in its first DMA with a different bank base. **Resolved 2026-05-24:** the SMC-patch refactor shipped in [c64-x25519#59](https://github.com/JC-000/c64-x25519/pull/59) (patch-label export) + [c64-x25519#60](https://github.com/JC-000/c64-x25519/pull/60) (DMA #1 delegated to the canonical fetch via `reu_fetch_mul_row_bank_patch`; DMA #2 kept inline; autoload-latch invariant documented + regression-guarded). Was tracked in [JC-000/c64-lib-contract#15](https://github.com/JC-000/c64-lib-contract/issues/15), closed.
 
-#14's evidence gate (cross-adopter brute-check round-trip) is now satisfied and `ct_mul_8x8` is promoted in §8.3 (v0.4.0). The `reu_fetch_doubled_row` follow-up (#15) stays open until its §8.2-baseline gate is acted on.
+Both follow-ups from this clause are resolved: #14's evidence gate (cross-adopter brute-check round-trip) was satisfied and `ct_mul_8x8` promoted in §8.3 (v0.4.0); #15's SMC-patch refactor landed adopter-side without any §8.2 contract change.
 
 ### 8.3 Shared constant-time 8×8→16 multiply body (`ct_mul_8x8`)
 
