@@ -1,1 +1,4 @@
 build/
+.serena/
+.claude/
+.ca65-ls/
