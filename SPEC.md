@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.4.0 (2026-06-20)
+**Version:** 0.4.1 (2026-07-18)
 **Status:** Draft — under joint review by adopters and consumers.
 
 ## 0. Scope and audience
@@ -525,10 +525,11 @@ Adopters include this bit in their `LIB_<X>_SHARED_PRIMITIVES` manifest equate u
 
 ## 9. Compatibility timeline
 
-- **2026-05-20 — v0.1.0 (this draft).** Contract is published; adopters land iteratively. Tracking issues filed against each adopter library.
-- **v1.0 — target: when all current adopters (see [adopters.md](adopters.md)) have landed all six sections.** Contract is then stable; breaking changes go through a deprecation cycle.
+- **2026-05-20 — v0.1.0.** Contract published with the six core sections (§1–§6); adopters land iteratively. Tracking issues filed against each adopter library.
+- **2026-05-20 → 2026-06-20 — v0.2.0–v0.4.0.** Additive growth: §7 semver expectations and §8 shared primitives (§8.0 precalc-table enumeration, §8.1 `sqtab`, §8.2 `reu_mul`, §8.3 `ct_mul_8x8`). See §12 for the per-release detail.
+- **v1.0 — target: when all current adopters (see [adopters.md](adopters.md)) have landed every applicable section, core and shared-primitive.** Contract is then stable; breaking changes go through a deprecation cycle.
 
-The v1.0 cutover triggers a coordinated tag bump (every adopter to `LIB_ABI_VERSION = 1`) so consumers can pin against `LIB_ABI_VERSION >= 1` and know all six contract sections are present.
+The v1.0 cutover triggers a coordinated tag bump (every adopter to `LIB_ABI_VERSION = 1`) so consumers can pin against `LIB_ABI_VERSION >= 1` and know the full contract surface is present.
 
 ## 10. Adopters
 
@@ -539,6 +540,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.4.1 — 2026-07-18
+
+Doc-only: refreshed the §9 "Compatibility timeline" so it reflects the contract's actual growth — v0.1.0's six core sections (§1–§6) plus the additive §7 (semver) and §8 (shared primitives, §8.0–§8.3) work through v0.4.0 — instead of describing v0.1.0 as "this draft," and restated the v1.0 gate as "every applicable section, core and shared-primitive" rather than "all six sections" now that §8 shared-primitive adoption is a tracked dimension in [adopters.md](adopters.md). Also brought the repo README's Status block and library list up to v0.4.0 in the same pass. No contract change — no symbol, macro, section, or build-target semantics changed.
 
 ### 0.4.0 — 2026-06-20
 
