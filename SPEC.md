@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.4.2 (2026-07-28)
+**Version:** 0.5.0 (2026-07-28)
 **Status:** Draft — under joint review by adopters and consumers.
 
 ## 0. Scope and audience
@@ -147,7 +147,7 @@ Every library MUST export the following four integer equates (in `src/lib_versio
 | `LIB_<X>_RESIDENT_BYTES` | Approximate code+rodata footprint that must remain CPU-resident in any consumer. Refreshed per release. |
 | `LIB_<X>_COLD_BYTES` | Approximate code+rodata footprint that a consumer MAY overlay-page (load on demand from REU, kernal-banked RAM, or external storage). Refreshed per release. |
 
-Libraries that consume one or more shared primitives defined in §8 MUST additionally export a `LIB_<X>_SHARED_PRIMITIVES` bitmask equate, ORed from the per-primitive bit constants declared in each §8.x sub-clause. The bitmask lets consumers detect duplicate ownership of any shared primitive at assemble time. See §8 for the bit allocation table and per-primitive bit names.
+Libraries that consume one or more shared primitives defined in §8 MUST additionally export a `LIB_<X>_SHARED_PRIMITIVES` bitmask equate, ORed from the per-primitive bit constants declared in each §8.x sub-clause, and its companion `LIB_<X>_SHARED_CONSUMES` bitmask (v0.5.0). The ownership bitmask lets consumers detect duplicate ownership of any shared primitive at assemble time; the consumes bitmask lets them verify every consumed primitive has an owner in the link. See §8.0 for the bit allocation table, the normative build-config state definitions, and both masks' required construction forms.
 
 These let a consumer's cfg do assemble-time fit checks:
 
@@ -232,6 +232,43 @@ LIB_<X>_SHARED_PRIMITIVES = _OWN_SQTAB | _OWN_CT_MUL    ; OR only the primitives
 ```
 
 The bit therefore means "owned in this build config": a standalone build (no switches defined) claims every primitive it consumes; an integrated build defers the shared ones it does not provide, and its bits drop out so the consumer disjointness assert holds.
+
+**Build-config states (normative, v0.5.0).** For each §8.x primitive, a given build configuration of an adopter is in exactly one of three states. A clear ownership bit alone does not distinguish the last two — and they impose opposite obligations on the composed consumer (see [#44](https://github.com/JC-000/c64-lib-contract/issues/44); the demonstrator is c64-x25519 v0.8.0, whose `SHARED_REU_MUL_INIT` deferral build and `X25519_ONCHIP_MUL` profile build both export `LIB_X25519_SHARED_PRIMITIVES = $0005` while requiring a §8.2 provider in the link and no provider at all, respectively):
+
+| State | `SHARED_PRIMITIVES` bit | `SHARED_CONSUMES` bit | Obligations |
+|---|---|---|---|
+| **owner** | set | set | Exports the primitive's init/body per its §8.x clause. |
+| **deferring consumer** | clear | set | The primitive's deferral switch is defined. The build still reads the primitive at runtime: it retains the primitive's consumption surface (placement equates, aggregate claims such as §3 REU banks), the composed link MUST contain exactly one owner, and boot MUST initialize the primitive before first use. |
+| **non-consumer** (profile-gated or permanent) | clear | clear | The primitive's placement/precalc export surface is absent, no aggregate claim is made, and there is no provider obligation. |
+
+**Companion mask `LIB_<X>_SHARED_CONSUMES` (required, v0.5.0).** Each adopter that consumes any §8 primitive MUST also export `LIB_<X>_SHARED_CONSUMES`: bit set **iff this build configuration consumes the primitive at all** — a deferral switch does NOT clear it; only profile-gated or permanent non-consumption does. Invariant: ownership bits are a subset of consumes bits, which each adopter pins at assemble time:
+
+```asm
+.assert (LIB_<X>_SHARED_PRIMITIVES & ~LIB_<X>_SHARED_CONSUMES) = 0, error, "a build cannot own a primitive it does not consume"
+```
+
+The consumes mask is derived from the same switches that already drive the conditional ownership mask — the profile/config gates drop bits from both masks, while the `SHARED_*` deferral switches drop bits from the ownership mask only:
+
+```asm
+.if ::X25519_ONCHIP_MUL          ; profile gate: drops the bit from BOTH masks
+  _USE_REU_MUL = 0
+.else
+  _USE_REU_MUL = LIB_SHARED_PRIMITIVES_REU_MUL
+.endif
+; ... one gate per primitive whose consumption is build-config-conditional ...
+LIB_<X>_SHARED_CONSUMES = LIB_SHARED_PRIMITIVES_SQTAB | _USE_REU_MUL | LIB_SHARED_PRIMITIVES_CT_MUL_8X8
+```
+
+The consumer-side composition story then completes with a coverage assert alongside the existing disjointness assert — every consumed primitive has exactly one owner somewhere in the link:
+
+```asm
+; existing (v0.4.0): no double ownership
+.assert (LIB_A_SHARED_PRIMITIVES & LIB_B_SHARED_PRIMITIVES) = 0, error, "shared-primitive double-ownership"
+; new (v0.5.0): no consumed primitive without an owner
+.assert ((LIB_A_SHARED_CONSUMES | LIB_B_SHARED_CONSUMES) & ~(LIB_A_SHARED_PRIMITIVES | LIB_B_SHARED_PRIMITIVES)) = 0, error, "consumed shared primitive with no owner in the link — exactly one library must be built without that primitive's SHARED_* switch"
+```
+
+Without the coverage assert, the missing-provider failure mode is an ld65 unresolved external at best (when the deferring library imports the canonical entry point) and a silent wrong-result at worst (table read with no init); with it, the failure is a named assemble-time error. *Link-time caveat:* importing manifest equates from two libraries currently collides on unprefixed §1/§8.4 symbols ([#43](https://github.com/JC-000/c64-lib-contract/issues/43)) — until that resolves, a two-library consumer applies these asserts through the §8.4 `od65 --dump-exports` out-of-band pattern for the second library.
 
 #### Catch loop: enumeration at adopter intake
 
@@ -540,6 +577,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.5.0 — 2026-07-28
+
+Additive (§8.0/§5): normative **three-state build-config semantics** for shared primitives — owner / deferring consumer / non-consumer — replacing the one-line "owned in this build config" gloss that left the two clear-bit states indistinguishable despite imposing opposite consumer obligations (a deferring build needs exactly one owner in the link and boot-time init; a profile-gated non-consumer needs nothing). Adds the required companion mask **`LIB_<X>_SHARED_CONSUMES`** (bit set iff the build config consumes the primitive; deferral switches do not clear it, profile gates do), the adopter-side subset invariant `.assert (OWNED & ~CONSUMES) = 0`, and the consumer-side **coverage assert** `((A_CONSUMES | B_CONSUMES) & ~(A_OWNED | B_OWNED)) = 0` that turns the missing-provider failure (ld65 unresolved external at best, silent uninitialized-table read at worst) into a named assemble-time error. All snippet forms assemble-tested against ca65 (deferral-pair pass, onchip-alone pass, missing-owner error). Demonstrator: c64-x25519 v0.8.0's deferral and onchip builds both export `$0005` ownership with opposite provider requirements. MINOR bump — additive equate, bit values unchanged, append-only preserved; adopters migrate in follow-up PRs (same shape as the [#21](https://github.com/JC-000/c64-lib-contract/issues/21) conditional-mask round; c64-x25519 and c64-nist-curves committed in-thread). Cross-references [#43](https://github.com/JC-000/c64-lib-contract/issues/43): the two-library link-time import path for the new assert is subject to that issue's unprefixed-symbol collision; the §8.4 `od65` out-of-band pattern applies until it resolves. Resolves [JC-000/c64-lib-contract#44](https://github.com/JC-000/c64-lib-contract/issues/44) (escalated from [c64-nist-curves#83](https://github.com/JC-000/c64-nist-curves/issues/83)).
 
 ### 0.4.2 — 2026-07-28
 
