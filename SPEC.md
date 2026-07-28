@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.4.1 (2026-07-18)
+**Version:** 0.4.2 (2026-07-28)
 **Status:** Draft — under joint review by adopters and consumers.
 
 ## 0. Scope and audience
@@ -111,7 +111,7 @@ ca65 --asm-define X25519_REU_BANK=$03 ...
 ```asm
 .import LIB_NISTCURVES_REU_BANKS_USED
 .import LIB_X25519_REU_BANKS_USED
-.assert (LIB_NISTCURVES_REU_BANKS_USED .and LIB_X25519_REU_BANKS_USED) = 0, error, "REU bank collision"
+.assert (LIB_NISTCURVES_REU_BANKS_USED & LIB_X25519_REU_BANKS_USED) = 0, error, "REU bank collision"
 ```
 
 Consumers MAY relocate any library's REU base via `--asm-define` to resolve a collision. The aggregate mask makes collisions visible at assemble time rather than runtime.
@@ -203,7 +203,7 @@ Each §8.x sub-clause declares one bit constant of the form `LIB_SHARED_PRIMITIV
 ```asm
 .import LIB_NISTCURVES_SHARED_PRIMITIVES
 .import LIB_CHACHA20_POLY1305_SHARED_PRIMITIVES
-.assert (LIB_NISTCURVES_SHARED_PRIMITIVES .and LIB_CHACHA20_POLY1305_SHARED_PRIMITIVES) = 0, error, "shared-primitive double-ownership — exactly one provider must own each shared primitive; the other(s) must build with that primitive's SHARED_* switch defined"
+.assert (LIB_NISTCURVES_SHARED_PRIMITIVES & LIB_CHACHA20_POLY1305_SHARED_PRIMITIVES) = 0, error, "shared-primitive double-ownership — exactly one provider must own each shared primitive; the other(s) must build with that primitive's SHARED_* switch defined"
 ```
 
 **Per-primitive deferral-switch mapping** (the define that, when present, zeroes the bit):
@@ -540,6 +540,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.4.2 — 2026-07-28
+
+Doc-only: fixed the two copy-paste collision-assert snippets to use ca65's **bitwise** `&` instead of the **boolean** `.and` — the §3 REU bank budget assert (`LIB_<X>_REU_BANKS_USED` composition) and the §8.0 shared-primitive double-ownership assert. In ca65 `A .and B` evaluates to 1 whenever both operands are nonzero, so the snippets as written failed to assemble exactly when two linked libraries each claimed anything — disjoint or not — and passed only when one mask was `$0000`, the vacuous case. Measured on ca65 V2.18; found wiring the c64-wireguard two-library consumer build (x25519 v0.8.0 + chacha20poly1305 v0.6.0). `.and` remains correct in boolean contexts (e.g. the §1 `.if` version-comparison example, which joins two comparisons); the 0.4.0 entry's prose below repeats the old form and is left as written — changelog entries are historical record. No contract change — no symbol, macro, or build-target semantics changed. Resolves [JC-000/c64-lib-contract#41](https://github.com/JC-000/c64-lib-contract/issues/41).
 
 ### 0.4.1 — 2026-07-18
 
