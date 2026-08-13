@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.6.1 (2026-08-12)
+**Version:** 0.7.0 (2026-08-12)
 **Status:** Draft — under joint review by adopters and consumers.
 
 ## 0. Scope and audience
@@ -15,42 +15,64 @@ The contract is deliberately minimal. It governs symbols and conventions, not im
 
 ## 1. Version identification
 
-Every library MUST export the following integer equates:
+Every library MUST export the following integer equates, where `<X>` is the library's own UPPER_SNAKE_CASE prefix — the same `<X>` used by its §5 manifest equates (`X25519`, `NISTCURVES`, `CHACHA20_POLY1305`, `POLYVAL`):
 
 | Symbol | Type | Semantics |
 |---|---|---|
-| `LIB_VERSION_MAJOR` | integer equate | Semantic-version major. Bumped on breaking ABI change. |
-| `LIB_VERSION_MINOR` | integer equate | Semantic-version minor. Bumped on additive ABI change (new symbol, new build target). |
-| `LIB_VERSION_PATCH` | integer equate | Bug-fix release. No ABI change. |
-| `LIB_ABI_VERSION` | integer equate | Bumped on any breaking export change. Matches the MAJOR bump. |
+| `LIB_<X>_VERSION_MAJOR` | integer equate | Semantic-version major. Bumped on breaking ABI change. |
+| `LIB_<X>_VERSION_MINOR` | integer equate | Semantic-version minor. Bumped on additive ABI change (new symbol, new build target). |
+| `LIB_<X>_VERSION_PATCH` | integer equate | Bug-fix release. No ABI change. |
+| `LIB_<X>_ABI_VERSION` | integer equate | Bumped on any breaking export change. Matches the MAJOR bump. |
 
 The symbols live in a dedicated file, conventionally `src/lib_version.s`, and are exported via `.export`.
+
+**Deprecated bare forms (v0.7.0).** Through v0.x every library MUST *also* export the unprefixed `LIB_VERSION_MAJOR` / `LIB_VERSION_MINOR` / `LIB_VERSION_PATCH` / `LIB_ABI_VERSION`, so existing single-library consumers keep working unchanged. These names are **deprecated and scheduled for removal at contract v1.0**: they are identical across every library, so a consumer that links two of them and imports both manifests gets `ld65: Error: Duplicate external identifier` ([#43](https://github.com/JC-000/c64-lib-contract/issues/43)). The bare exports MUST be gated on `LIB_NO_BARE_EXPORTS` so a composing consumer can suppress them build-wide with `ca65 -D LIB_NO_BARE_EXPORTS=1`.
+
+**TU isolation (required).** The bare exports MUST live in a translation unit that exports nothing else — no §5 manifest equates, no §8.4 table equates, no code. §8.4 requires the `LIB_PRECALC_TABLE` macro to be included from a single TU, and ld65 pulls in whole object members: if the bare names share a member with anything a consumer legitimately imports, they enter the link uninvited and collide even when the consumer never referenced them. `src/lib_version.s` holding only the block below satisfies this; §5's aggregate equates move to `src/lib_manifest.s`.
 
 **Pattern:**
 
 ```asm
-; src/lib_version.s
-.export LIB_VERSION_MAJOR
-.export LIB_VERSION_MINOR
-.export LIB_VERSION_PATCH
-.export LIB_ABI_VERSION
+; src/lib_version.s — exports nothing but these
+.export LIB_X25519_VERSION_MAJOR
+.export LIB_X25519_VERSION_MINOR
+.export LIB_X25519_VERSION_PATCH
+.export LIB_X25519_ABI_VERSION
 
-LIB_VERSION_MAJOR = 0
-LIB_VERSION_MINOR = 4
-LIB_VERSION_PATCH = 0
-LIB_ABI_VERSION   = 1
+LIB_X25519_VERSION_MAJOR = 0
+LIB_X25519_VERSION_MINOR = 8
+LIB_X25519_VERSION_PATCH = 0
+LIB_X25519_ABI_VERSION   = 1
+
+.ifndef LIB_NO_BARE_EXPORTS
+    ; Deprecated, removed at contract v1.0. Suppress with
+    ; ca65 -D LIB_NO_BARE_EXPORTS=1 when composing two or more libraries.
+    .export LIB_VERSION_MAJOR
+    .export LIB_VERSION_MINOR
+    .export LIB_VERSION_PATCH
+    .export LIB_ABI_VERSION
+
+    LIB_VERSION_MAJOR = LIB_X25519_VERSION_MAJOR
+    LIB_VERSION_MINOR = LIB_X25519_VERSION_MINOR
+    LIB_VERSION_PATCH = LIB_X25519_VERSION_PATCH
+    LIB_ABI_VERSION   = LIB_X25519_ABI_VERSION
+.endif
 ```
+
+Aliasing the bare names to the prefixed ones rather than restating the literals means a release bump touches four lines, not eight, and the two forms cannot drift.
 
 **Consumer-side usage:**
 
 ```asm
-.import LIB_VERSION_MAJOR
-.import LIB_VERSION_MINOR
+.import LIB_X25519_VERSION_MAJOR
+.import LIB_X25519_VERSION_MINOR
 
-.if LIB_VERSION_MAJOR < 1 .and LIB_VERSION_MINOR < 4
-    .error "this consumer needs libfoo v0.4 or later"
+.if LIB_X25519_VERSION_MAJOR < 1 .and LIB_X25519_VERSION_MINOR < 8
+    .error "this consumer needs c64-x25519 v0.8 or later"
 .endif
 ```
+
+A consumer linking two or more libraries builds them all with `-D LIB_NO_BARE_EXPORTS=1` and imports the prefixed forms only; the guard above then names which library is out of date instead of reporting one anonymous version.
 
 Where a consumer pins to a specific library version via git submodule SHA, the `LIB_VERSION_*` guard is a defense-in-depth assert that fires at assemble time before any 30-minute link/test cycle.
 
@@ -138,7 +160,7 @@ my_helper:
 
 ## 5. Aggregate manifest equates
 
-Every library MUST export the following four integer equates (in `src/lib_version.s` or a separate `src/lib_manifest.s`):
+Every library MUST export the following four integer equates. As of v0.7.0 they live in `src/lib_manifest.s`, **not** `src/lib_version.s` — §1 requires that file to carry the deprecated bare version exports and nothing else, so that importing a manifest equate cannot drag them into the link:
 
 | Symbol | Semantics |
 |---|---|
@@ -277,7 +299,7 @@ APP_OWNED = LIB_SHARED_PRIMITIVES_SQTAB   ; primitives provided by the consumer'
 .assert ((LIB_A_SHARED_CONSUMES | LIB_B_SHARED_CONSUMES) & ~(LIB_A_SHARED_PRIMITIVES | LIB_B_SHARED_PRIMITIVES | APP_OWNED)) = 0, error, "consumed shared primitive with no owner in the link"
 ```
 
-Without the coverage assert, the missing-provider failure mode is an ld65 unresolved external at best (when the deferring library imports the canonical entry point) and a silent wrong-result at worst (table read with no init); with it, the failure is a named assemble-time error. *Link-time caveat:* importing manifest equates from two libraries currently collides on unprefixed §1/§8.4 symbols ([#43](https://github.com/JC-000/c64-lib-contract/issues/43)) — until that resolves, a two-library consumer applies these asserts through the §8.4 `od65 --dump-exports` out-of-band pattern for the second library.
+Without the coverage assert, the missing-provider failure mode is an ld65 unresolved external at best (when the deferring library imports the canonical entry point) and a silent wrong-result at worst (table read with no init); with it, the failure is a named assemble-time error. *Link-time note (v0.7.0):* importing manifest equates from two libraries used to collide on the unprefixed §1/§8.4 symbols ([#43](https://github.com/JC-000/c64-lib-contract/issues/43)). Adopters that have shipped the v0.7.0 prefixed forms compose directly: build every library with `ca65 -D LIB_NO_BARE_EXPORTS=1` and import the `LIB_<X>_*` equates from each. Against a library still on the bare-only forms, the §8.4 `od65 --dump-exports` out-of-band pattern remains the fallback for that library.
 
 #### Catch loop: enumeration at adopter intake
 
@@ -293,7 +315,7 @@ Tables below this floor (ChaCha20 quarter-round constants, mod-n reduction one-o
 **Two-form enumeration.** Each enumerated table is recorded in *both* of the following forms:
 
 1. **Doc-level** in `docs/precalc-tables.md` (or equivalent path linked from the adopter's `adopters.md` row): name, size, region, source file, classification (curve-/algorithm-specific *or* potentially shareable), and the rationale for the classification. The rationale is the load-bearing field — writing it down forces the maintainer to think through whether a sibling library might converge on the same shape.
-2. **Assembler-level** via the `LIB_PRECALC_TABLE` macro (canonical source below). The macro emits three exported equates per invocation that survive doc rot and make build-time audits mechanical: `grep -r 'LIB_PRECALC_' src/` adopter-local, `od65 --dump-exports build/lib.o | grep LIB_PRECALC` post-build (cc65 toolchain; `od65` is the cc65 object-file inspector that reads ca65 `.o` and `.a` archives).
+2. **Assembler-level** via the `LIB_PRECALC_TABLE` macro (canonical source below). The macro emits three exported equates per invocation that survive doc rot and make build-time audits mechanical: `grep -r '_PRECALC_' src/` adopter-local, `od65 --dump-exports build/lib.o | grep _PRECALC_` post-build. (Audit on `_PRECALC_`, not `LIB_PRECALC_`: as of v0.7.0 the macro also emits the library-prefixed `LIB_<X>_PRECALC_<name>_*` form, which the older pattern would miss.) (cc65 toolchain; `od65` is the cc65 object-file inspector that reads ca65 `.o` and `.a` archives).
 
 Both forms are required. The doc captures shape and rationale; the macro captures size, region, and sharing as build-time data. An asymmetry between the two (a `LIB_PRECALC_*` export with no `docs/precalc-tables.md` row, or vice versa) blocks the adopter PR per the intake-reviewer-MUST rule in `adopters.md`.
 
@@ -301,8 +323,14 @@ Both forms are required. The doc captures shape and rationale; the macro capture
 
 ```ca65
 ; precalc_table.inc — canonical per c64-lib-contract SPEC §8.0 catch-loop.
-; Copy verbatim from this repo's root into each adopter's src/. Updates
-; land via coordinated cross-repo PR; do not edit local copies.
+;
+; CANONICAL SOURCE. The fenced code block in SPEC.md §8.0 is shown for
+; readability; this file is the byte-for-byte source adopters copy into
+; their own src/precalc_table.inc. Updates land via coordinated cross-repo
+; PR; do not edit your local copy.
+;
+; Smoke-tested in examples/precalc_table_smoke.s and exercised by `make verify`
+; at this repo's root.
 
 .ifndef PRECALC_TABLE_INC_INCLUDED
 PRECALC_TABLE_INC_INCLUDED = 1
@@ -314,38 +342,74 @@ PRECALC_REGION_RODATA  = $03
 PRECALC_SHARED_NO      = $00
 PRECALC_SHARED_YES     = $01
 
-; LIB_PRECALC_TABLE "name", size_bytes, region, shared
+; LIB_PRECALC_TABLE "name", size_bytes, region, shared [, "LIB"]
 ;
 ;   "name":       quoted string literal (becomes the symbol suffix;
 ;                 use lower_snake_case, no leading digit)
 ;   size_bytes:   total bytes claimed by the table
 ;   region:       PRECALC_REGION_RAM | _REU | _RODATA
 ;   shared:       PRECALC_SHARED_YES | PRECALC_SHARED_NO
+;   "LIB":        quoted library prefix, UPPER_SNAKE_CASE, matching the
+;                 <X> in this library's §5 LIB_<X>_* manifest equates
+;                 (e.g. "X25519", "CHACHA20_POLY1305"). Required as of
+;                 SPEC v0.7.0; omitted only by pre-v0.7.0 adopters that
+;                 have not yet migrated.
 ;
-; Emits three exported equates per invocation. The macro preserves the
-; case of the `name` argument verbatim (ca65 has no built-in toupper),
-; so `LIB_PRECALC_TABLE "sqtab", ...` emits the symbols below in their
-; lower-case form. The normative §8.x canonical names use
-; lower_snake_case throughout, so cross-adopter audits grep on a single
-; case convention:
+; Emits, per invocation:
 ;
-;   LIB_PRECALC_<name>_SIZE     = size_bytes
-;   LIB_PRECALC_<name>_REGION   = region
-;   LIB_PRECALC_<name>_SHARED   = shared
+;   LIB_<LIB>_PRECALC_<name>_{SIZE,REGION,SHARED}   (when "LIB" is given)
+;   LIB_PRECALC_<name>_{SIZE,REGION,SHARED}         (unless suppressed)
+;
+; The prefixed form is collision-free across libraries, so a consumer
+; linking two libraries can .import both manifests and cross-check that
+; they agree on a shared table's shape (SPEC #43). The bare form is
+; DEPRECATED — it is the form that collides — and is scheduled for
+; removal at contract v1.0.
+;
+; Define LIB_NO_BARE_EXPORTS (ca65 -D LIB_NO_BARE_EXPORTS=1) to suppress
+; the deprecated bare form. A consumer composing two or more libraries
+; that describe the same shared table MUST build them all with this
+; define; otherwise ld65 rejects the link with
+;   Duplicate external identifier: 'LIB_PRECALC_<name>_SHARED'
+; Single-library consumers need not define it, and adopters assembling
+; standalone keep the bare exports by default.
+;
+; The macro preserves the case of the `name` argument verbatim (ca65 has
+; no built-in toupper), so `LIB_PRECALC_TABLE "sqtab", ...` emits the
+; symbols in their lower-case form. The normative §8.x canonical names
+; use lower_snake_case throughout, so cross-adopter audits grep on a
+; single case convention — and on `_PRECALC_`, which matches both the
+; prefixed and bare forms.
 ;
 ; SIZE is exported without an address-size hint so values > 16 bits
-; (e.g. the 131072-byte REU mul table) export cleanly as 'far' without
-; a "far but exported absolute" warning. REGION and SHARED are
-; byte-valued and exported without a hint for consistency.
+; (e.g. the 131072-byte REU mul table) export cleanly as 'far'
+; without a "far but exported absolute" warning. REGION and SHARED
+; are byte-valued and exported without a hint for consistency.
 
-.macro LIB_PRECALC_TABLE name, size_bytes, region, shared
-    .ident (.sprintf("LIB_PRECALC_%s_SIZE",   name)) = size_bytes
-    .ident (.sprintf("LIB_PRECALC_%s_REGION", name)) = region
-    .ident (.sprintf("LIB_PRECALC_%s_SHARED", name)) = shared
+.macro LIB_PRECALC_TABLE name, size_bytes, region, shared, lib
+    .ifndef LIB_NO_BARE_EXPORTS
+        .ident (.sprintf("LIB_PRECALC_%s_SIZE",   name)) = size_bytes
+        .ident (.sprintf("LIB_PRECALC_%s_REGION", name)) = region
+        .ident (.sprintf("LIB_PRECALC_%s_SHARED", name)) = shared
 
-    .export .ident (.sprintf("LIB_PRECALC_%s_SIZE",   name))
-    .export .ident (.sprintf("LIB_PRECALC_%s_REGION", name))
-    .export .ident (.sprintf("LIB_PRECALC_%s_SHARED", name))
+        .export .ident (.sprintf("LIB_PRECALC_%s_SIZE",   name))
+        .export .ident (.sprintf("LIB_PRECALC_%s_REGION", name))
+        .export .ident (.sprintf("LIB_PRECALC_%s_SHARED", name))
+    .endif
+
+    .if .not .blank (lib)
+        .ident (.sprintf("LIB_%s_PRECALC_%s_SIZE",   lib, name)) = size_bytes
+        .ident (.sprintf("LIB_%s_PRECALC_%s_REGION", lib, name)) = region
+        .ident (.sprintf("LIB_%s_PRECALC_%s_SHARED", lib, name)) = shared
+
+        .export .ident (.sprintf("LIB_%s_PRECALC_%s_SIZE",   lib, name))
+        .export .ident (.sprintf("LIB_%s_PRECALC_%s_REGION", lib, name))
+        .export .ident (.sprintf("LIB_%s_PRECALC_%s_SHARED", lib, name))
+    .else
+        .ifdef LIB_NO_BARE_EXPORTS
+            .error "LIB_PRECALC_TABLE: LIB_NO_BARE_EXPORTS suppresses the bare exports, so the lib-prefix argument is required — this invocation would emit nothing"
+        .endif
+    .endif
 .endmacro
 
 .endif ; PRECALC_TABLE_INC_INCLUDED
@@ -356,32 +420,39 @@ PRECALC_SHARED_YES     = $01
 ```ca65
 .include "precalc_table.inc"
 
-LIB_PRECALC_TABLE "sqtab",        1024,   PRECALC_REGION_RAM,    PRECALC_SHARED_YES
-LIB_PRECALC_TABLE "reu_mul",      131072, PRECALC_REGION_REU,    PRECALC_SHARED_YES
-LIB_PRECALC_TABLE "lim_lee_comb", 24576,  PRECALC_REGION_REU,    PRECALC_SHARED_NO
-LIB_PRECALC_TABLE "sha384_k",     640,    PRECALC_REGION_RODATA, PRECALC_SHARED_NO
+LIB_PRECALC_TABLE "sqtab",        1024,   PRECALC_REGION_RAM,    PRECALC_SHARED_YES, "NISTCURVES"
+LIB_PRECALC_TABLE "reu_mul",      131072, PRECALC_REGION_REU,    PRECALC_SHARED_YES, "NISTCURVES"
+LIB_PRECALC_TABLE "lim_lee_comb", 24576,  PRECALC_REGION_REU,    PRECALC_SHARED_NO,  "NISTCURVES"
+LIB_PRECALC_TABLE "sha384_k",     640,    PRECALC_REGION_RODATA, PRECALC_SHARED_NO,  "NISTCURVES"
 ```
 
-**Consumer-side composition** (optional, for the consumer that wants to cross-check a composed library's shape). The canonical cross-check reads the exported equates out of the post-build object via `od65 --dump-exports` — the same tool §8.0 already uses for the adopter-intake audit above — and greps for the `LIB_PRECALC_<name>_*` symbol family:
+The fifth argument is the library prefix (§1/§5 `<X>`), **required as of v0.7.0**. It is what makes the emitted equates collision-free: the same `"sqtab"` invocation in two libraries yields `LIB_NISTCURVES_PRECALC_sqtab_SIZE` and `LIB_X25519_PRECALC_sqtab_SIZE`, which a consumer can import together. The table *name* stays unprefixed and normative (see the §8.1/§8.2 back-links below) — the prefix distinguishes the *declaring library*, never the table.
+
+**Consumer-side composition** (optional, for the consumer that wants to cross-check a composed library's shape). The canonical cross-check reads the exported equates out of the post-build object via `od65 --dump-exports` — the same tool §8.0 already uses for the adopter-intake audit above — and greps for the `_PRECALC_<name>_*` symbol family:
 
 ```sh
-od65 --dump-exports build/*.o | grep LIB_PRECALC_reu_mul
+od65 --dump-exports build/*.o | grep _PRECALC_reu_mul
 ```
 
-This reports `LIB_PRECALC_reu_mul_SIZE`, `_REGION`, and `_SHARED` with their exported values for any table size, including the 128 KB `reu_mul` and the 192 KB `reu_mul_doubled`. A consumer build script asserts the values it expects (`_SHARED = 1`, `_SIZE = 131072`) against this dump.
+This reports `LIB_<X>_PRECALC_reu_mul_SIZE`, `_REGION`, and `_SHARED` — plus the deprecated bare `LIB_PRECALC_reu_mul_*` triple while it is still emitted — with their exported values for any table size, including the 128 KB `reu_mul` and the 192 KB `reu_mul_doubled`. A consumer build script asserts the values it expects (`_SHARED = 1`, `_SIZE = 131072`) against this dump.
 
 > **Address-size limit (normative).** On the ca65 6502 target an *assemble-time* cross-check that `.import`s `LIB_PRECALC_<name>_SIZE` into a second translation unit and `.assert`s on it only works for tables **≤ 65 535 B**. ca65's `.import` accepts only the `: zp` (8-bit) and `: abs` (16-bit) address-size hints — there is no `: far` (24-bit) form — so importing the `_SIZE` of a larger table (e.g. `reu_mul` = 131072 B) raises `Range error (131072 not in [-32768..65535])` at the consumer. The producer-side `.export LIB_PRECALC_<name>_SIZE` equate is unaffected (ca65 `.export` accepts an absolute value of any width up to 32 bits — see the macro note in `precalc_table.inc`); only the *consuming* `.import` is constrained. For tables that fit, the assemble-time form is available:
 >
 > ```asm
 > ; Assemble-time cross-check — VALID ONLY for tables ≤ 65 535 B.
 > ; For larger tables (reu_mul, reu_mul_doubled) use the od65 dump above.
-> .import LIB_PRECALC_sqtab_SHARED
-> .import LIB_PRECALC_sqtab_SIZE
-> .assert LIB_PRECALC_sqtab_SHARED = PRECALC_SHARED_YES, error, "if this lib reports sqtab, it MUST claim sharing"
-> .assert LIB_PRECALC_sqtab_SIZE   = 1024,               error, "sqtab size mismatch — bit-identical shape required for §8.1"
+> .import LIB_X25519_PRECALC_sqtab_SHARED
+> .import LIB_X25519_PRECALC_sqtab_SIZE
+> .assert LIB_X25519_PRECALC_sqtab_SHARED = PRECALC_SHARED_YES, error, "if this lib reports sqtab, it MUST claim sharing"
+> .assert LIB_X25519_PRECALC_sqtab_SIZE   = 1024,               error, "sqtab size mismatch — bit-identical shape required for §8.1"
+> 
+> ; Two-library agreement check — the cross-check the bare form could never
+> ; express, because both libraries emitted the same symbol name (#43).
+> .import LIB_CHACHA20_POLY1305_PRECALC_sqtab_SIZE
+> .assert LIB_X25519_PRECALC_sqtab_SIZE = LIB_CHACHA20_POLY1305_PRECALC_sqtab_SIZE, error, "linked libraries disagree on the shared sqtab size"
 > ```
 
-Note the symbol case: `LIB_PRECALC_reu_mul_*` / `LIB_PRECALC_sqtab_*` with lower-case middle component. The macro preserves the literal case of the `name` argument since ca65 has no built-in toupper; the normative §8.x canonical names use lower_snake_case so adopters and consumers grep on a single case convention.
+Note the symbol case: `LIB_<X>_PRECALC_reu_mul_*` / `LIB_<X>_PRECALC_sqtab_*` — UPPER_SNAKE_CASE library prefix, lower-case table name. The macro preserves the literal case of the `name` argument since ca65 has no built-in toupper; the normative §8.x canonical names use lower_snake_case so adopters and consumers grep on a single case convention.
 
 **Audit triggers.** A precalc table flagged `PRECALC_SHARED_YES` by two or more adopters at byte-identical size + region is a §8.x promotion candidate. The audit step runs:
 
@@ -442,10 +513,10 @@ LIB_<X>_SHARED_PRIMITIVES = LIB_SHARED_PRIMITIVES_SQTAB
 **§8.0 catch-loop registry.** Adopters consuming this primitive MUST emit, in addition to the manifest-equate bit above, one §8.0 catch-loop macro invocation:
 
 ```ca65
-LIB_PRECALC_TABLE "sqtab", 1024, PRECALC_REGION_RAM, PRECALC_SHARED_YES
+LIB_PRECALC_TABLE "sqtab", 1024, PRECALC_REGION_RAM, PRECALC_SHARED_YES, "<X>"
 ```
 
-The string `"sqtab"` is **normative**; adopters MUST NOT substitute a library-prefixed variant (e.g., `"nistcurves_sqtab"` or `"chacha_sqtab"`). The cross-adopter audit `od65 --dump-exports build/*.o | grep LIB_PRECALC_sqtab_SIZE` depends on every adopter exporting the same `LIB_PRECALC_sqtab_*` symbol family. Size (`1024`) and region (`PRECALC_REGION_RAM`) are also normative — they are invariants of the shared shape — only placement (the `LIB_SHARED_SQTAB_BASE` equate above) is consumer-chosen.
+The string `"sqtab"` is **normative**; adopters MUST NOT substitute a library-prefixed variant (e.g., `"nistcurves_sqtab"` or `"chacha_sqtab"`). The cross-adopter audit `od65 --dump-exports build/*.o | grep _PRECALC_sqtab_SIZE` depends on every adopter exporting the same `_PRECALC_sqtab_*` symbol family. The v0.7.0 library prefix goes in the fifth macro argument, never into the table name: `LIB_X25519_PRECALC_sqtab_SIZE` keeps the audit signal-rich, `LIB_PRECALC_x25519_sqtab_SIZE` would destroy it. Size (`1024`) and region (`PRECALC_REGION_RAM`) are also normative — they are invariants of the shared shape — only placement (the `LIB_SHARED_SQTAB_BASE` equate above) is consumer-chosen.
 
 **Related future promotion.** The multiply body that consumes the table (`mul_8x8` / `ct_mul_8x8`) is duplicated across the same set of libraries. The CT-strict `ct_mul_8x8` variant (introduced by `c64-ChaCha20-Poly1305` v0.3.0, already ported by `c64-nist-curves`) is the right candidate to promote alongside `sqtab` once two or more adopters confirm bit-identical bodies. This clause does not pre-commit to that promotion; it is named here so adopters know which variant to align on if they touch the multiply body during the sqtab migration. **(Resolved in v0.4.0:** `ct_mul_8x8` was promoted to §8.3, bit `$0004`, once all three adopters confirmed byte-identical bodies via the cross-adopter `ct_mul_brute_check` gate.**)**
 
@@ -524,10 +595,10 @@ Adopters OR it into their `LIB_<X>_SHARED_PRIMITIVES` manifest equate (§5) and 
 **§8.0 catch-loop registry.** Adopters consuming this primitive MUST emit, in addition to the manifest-equate bit above, one §8.0 catch-loop macro invocation:
 
 ```ca65
-LIB_PRECALC_TABLE "reu_mul", 131072, PRECALC_REGION_REU, PRECALC_SHARED_YES
+LIB_PRECALC_TABLE "reu_mul", 131072, PRECALC_REGION_REU, PRECALC_SHARED_YES, "<X>"
 ```
 
-The string `"reu_mul"` is **normative**; adopters MUST NOT substitute a library-prefixed variant (e.g., `"nistcurves_reu_mul"` or `"x25519_reu_mul"`). The cross-adopter audit `od65 --dump-exports build/*.o | grep LIB_PRECALC_reu_mul_SIZE` depends on every adopter exporting the same `LIB_PRECALC_reu_mul_*` symbol family. (`od65` is the cc65 object-file inspector; ca65 `.o` files are not in ELF/Mach-O format so standard `nm` cannot read them. Symbol case is preserved from the macro argument — see §8.0.) Size (`131072`) and region (`PRECALC_REGION_REU`) are also normative — they are invariants of the shared shape — only placement (the `LIB_SHARED_REU_MUL_BANK` equate above) is consumer-chosen.
+The string `"reu_mul"` is **normative**; adopters MUST NOT substitute a library-prefixed variant (e.g., `"nistcurves_reu_mul"` or `"x25519_reu_mul"`). The cross-adopter audit `od65 --dump-exports build/*.o | grep _PRECALC_reu_mul_SIZE` depends on every adopter exporting the same `_PRECALC_reu_mul_*` symbol family (the v0.7.0 library prefix goes in the fifth macro argument, never into the table name — see §8.1). (`od65` is the cc65 object-file inspector; ca65 `.o` files are not in ELF/Mach-O format so standard `nm` cannot read them. Symbol case is preserved from the macro argument — see §8.0.) Size (`131072`) and region (`PRECALC_REGION_REU`) are also normative — they are invariants of the shared shape — only placement (the `LIB_SHARED_REU_MUL_BANK` equate above) is consumer-chosen.
 
 **Worked consumer layout (TLS 1.3 stack).** A consumer that links `c64-nist-curves` (consumes §8.2 plus its own Lim-Lee comb at a private REU bank), `c64-x25519` (consumes §8.2 plus its own pre-doubled tables at private REU banks under `SQR_DMA_K > 0`), and `c64-ChaCha20-Poly1305` (consumes §8.1 sqtab only, no §8.2) might cfg as follows:
 
@@ -575,6 +646,7 @@ Adopters include this bit in their `LIB_<X>_SHARED_PRIMITIVES` manifest equate u
 - **2026-05-20 → 2026-06-20 — v0.2.0–v0.4.0.** Additive growth: §7 semver expectations and §8 shared primitives (§8.0 precalc-table enumeration, §8.1 `sqtab`, §8.2 `reu_mul`, §8.3 `ct_mul_8x8`). See §12 for the per-release detail.
 - **2026-07-28 — v0.5.0.** Additive: §8.0/§5 three-state build-config semantics for shared primitives (owner / deferring consumer / non-consumer) plus the companion `LIB_<X>_SHARED_CONSUMES` mask and its consumer-side coverage assert.
 - **2026-08-12 — v0.6.0.** Additive: §13 network backend ABI — the first non-cryptographic chapter, standardizing the symbol surface and device-timing semantics both consumers had independently forked for their ip65/UCI networking adapters.
+- **2026-08-12 — v0.7.0.** Additive: library-prefixed §1 version exports and §8.4 precalc-table equates, resolving the two-library manifest-import collision ([#43](https://github.com/JC-000/c64-lib-contract/issues/43)). The unprefixed forms stay required and gated behind `LIB_NO_BARE_EXPORTS` until v1.0 removes them.
 - **v1.0 — target: when all current adopters (see [adopters.md](adopters.md)) have landed every applicable section, core and shared-primitive.** Contract is then stable; breaking changes go through a deprecation cycle.
 
 The v1.0 cutover triggers a coordinated tag bump (every adopter to `LIB_ABI_VERSION = 1`) so consumers can pin against `LIB_ABI_VERSION >= 1` and know the full contract surface is present.
@@ -588,6 +660,16 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.7.0 — 2026-08-12
+
+Additive (§1/§5/§8.4): **library-prefixed manifest exports**, resolving the two-library link collision measured in [#43](https://github.com/JC-000/c64-lib-contract/issues/43). §1's four version equates gain required `LIB_<X>_`-prefixed forms (`LIB_X25519_VERSION_MAJOR`, ...) and the §8.4 `LIB_PRECALC_TABLE` macro gains a fifth argument, the library prefix, emitting `LIB_<X>_PRECALC_<name>_{SIZE,REGION,SHARED}` alongside the existing bare triple. The unprefixed §1 and §8.4 names remain **required through v0.x and deprecated**, so no adopter breaks and no consumer flag-day is needed; they are gated on a new `LIB_NO_BARE_EXPORTS` define (`ca65 -D LIB_NO_BARE_EXPORTS=1`) that a composing consumer sets across every library in the link, and they are scheduled for removal at v1.0. §1 additionally requires the bare exports to live in a translation unit exporting nothing else: ld65 links whole object members, so bare names sharing a member with a legitimately-imported equate enter the link uninvited — which is why TU separation alone could never have fixed `LIB_PRECALC_*`, whose bare and prefixed forms are emitted by one macro invocation in one TU. §5's aggregate equates therefore move to `src/lib_manifest.s`.
+
+Measured against ca65 V2.18 / ld65: the pre-change two-library link reproduces `ld65: Error: Duplicate external identifier: 'LIB_PRECALC_sqtab_SHARED'` exactly as reported; with both libraries built under `-D LIB_NO_BARE_EXPORTS=1` the same link succeeds, and the consumer-side cross-check `.assert LIB_X25519_PRECALC_sqtab_SIZE = LIB_CHACHA20_POLY1305_PRECALC_sqtab_SIZE` both passes on agreement and fires on a seeded disagreement. That agreement check is a capability the bare form could not express at all — two libraries describing the same shared table emitted one symbol name, so there was nothing to compare. `make verify` now assembles the smoke test in both export modes and adds a negative case pinning the macro's guard: a legacy four-argument invocation under `-D LIB_NO_BARE_EXPORTS` emits no symbols at all and must fail with a named error rather than silently producing an empty manifest.
+
+Audit patterns move from `LIB_PRECALC_` to `_PRECALC_` (`grep -r '_PRECALC_' src/`, `od65 --dump-exports build/lib.o | grep _PRECALC_`), which matches both forms; the older pattern would silently miss every prefixed export. The §8.1/§8.2 rule that the table *name* stays unprefixed is unchanged and now stated against its opposite: the library prefix belongs in the fifth macro argument, never in the table name, or the cross-adopter audit loses its signal.
+
+MINOR bump — every pre-v0.7.0 adopter and consumer keeps working untouched; the four-argument macro form still assembles and still emits the bare triple. Adopters migrate in follow-up PRs (same shape as the [#21](https://github.com/JC-000/c64-lib-contract/issues/21) and [#44](https://github.com/JC-000/c64-lib-contract/issues/44) rounds). Unblocks the v0.5.0 §8.0 coverage assert for the multi-library consumers it was written for — `c64-wireguard` currently applies it to one library at link time and checks the other out-of-band. Resolves [JC-000/c64-lib-contract#43](https://github.com/JC-000/c64-lib-contract/issues/43).
 
 ### 0.6.1 — 2026-08-12
 
