@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.7.4 (2026-08-13)
+**Version:** 0.7.5 (2026-08-13)
 **Status:** Draft — under joint review by adopters and consumers.
 
 ## 0. Scope and audience
@@ -22,11 +22,24 @@ Every library MUST export the following integer equates, where `<X>` is the libr
 | `LIB_<X>_VERSION_MAJOR` | integer equate | Semantic-version major. Bumped on breaking ABI change. |
 | `LIB_<X>_VERSION_MINOR` | integer equate | Semantic-version minor. Bumped on additive ABI change (new symbol, new build target). |
 | `LIB_<X>_VERSION_PATCH` | integer equate | Bug-fix release. No ABI change. |
-| `LIB_<X>_ABI_VERSION` | integer equate | Bumped on any breaking export change. Matches the MAJOR bump. |
+| `LIB_<X>_ABI_VERSION` | integer equate | Monotonic generation counter for the exported surface, **starting at 1**. Incremented on any breaking export change. Deliberately independent of MAJOR — see the note below. |
 
 The symbols live in a dedicated file, conventionally `src/lib_version.s`, and are exported via `.export`.
 
 **Deprecated bare forms (v0.7.0).** Through v0.x every library MUST *also* export the unprefixed `LIB_VERSION_MAJOR` / `LIB_VERSION_MINOR` / `LIB_VERSION_PATCH` / `LIB_ABI_VERSION`, so existing single-library consumers keep working unchanged. These names are **deprecated and scheduled for removal at contract v1.0**: they are identical across every library, so a consumer that links two of them and imports both manifests gets `ld65: Error: Duplicate external identifier` ([#43](https://github.com/JC-000/c64-lib-contract/issues/43)). The bare exports MUST be gated on `LIB_NO_BARE_EXPORTS` so a composing consumer can suppress them build-wide with `ca65 -D LIB_NO_BARE_EXPORTS=1`.
+
+**`LIB_<X>_ABI_VERSION` is independent of MAJOR (normative, v0.7.5).** It is a generation counter for the exported surface, not a mirror of the semantic version. It starts at **1** and increments on any breaking export change — a removed or renamed symbol, a changed calling convention, a changed memory model.
+
+It cannot track MAJOR, because §7 permits breaking changes on MINOR bumps while a library is pre-1.0, so MAJOR stays `0` across breakage and carries no signal. A consumer gating on `LIB_<X>_ABI_VERSION` would then never fire for exactly the changes the gate exists to catch. This is not hypothetical: `c64-nist-curves` v0.9.0 removed 17 exported symbols on a MINOR bump ([#90](https://github.com/JC-000/c64-nist-curves/issues/90), [#91](https://github.com/JC-000/c64-nist-curves/issues/91)) with `LIB_NISTCURVES_ABI_VERSION` left at `0` per the previous "matches MAJOR" wording, and consumer guards stayed silent.
+
+Consumers gate on this equate rather than on MINOR being "safe":
+
+```asm
+.import LIB_X25519_ABI_VERSION
+.if LIB_X25519_ABI_VERSION <> 1
+    .error "c64-x25519 exported-surface generation changed; re-check the integration"
+.endif
+```
 
 **TU isolation (required).** The bare exports MUST live in a translation unit that exports nothing else — no §5 manifest equates, no §8.4 table equates, no code. §8.4 requires the `LIB_PRECALC_TABLE` macro to be included from a single TU, and ld65 pulls in whole object members: if the bare names share a member with anything a consumer legitimately imports, they enter the link uninvited and collide even when the consumer never referenced them. `src/lib_version.s` holding only the block below satisfies this; §5's aggregate equates move to `src/lib_manifest.s`.
 
@@ -202,7 +215,7 @@ Consumers fetch `build/lib/<libname>-<variant>.a` and link directly. No mid-buil
 - **MAJOR** — bumped on any breaking change to the exported surface (removed/renamed symbols, changed calling conventions, changed memory model, changed semver of a manifest equate).
 - **MINOR** — bumped on additive changes (new symbols, new build targets, new manifest equates, new variants).
 - **PATCH** — bug fix only, no ABI surface change.
-- **`LIB_ABI_VERSION`** matches the MAJOR component. Consumer-side `.if LIB_ABI_VERSION != 1` is the load-bearing breakage gate.
+- **`LIB_<X>_ABI_VERSION`** is **not** derived from MAJOR. It is an independent generation counter for the exported surface, starting at 1 and incremented on any breaking export change (§1). Consumer-side `.if LIB_<X>_ABI_VERSION <> <expected>` is the load-bearing breakage gate — and it is load-bearing *because* of the next paragraph: pre-1.0 breakage rides MINOR bumps, so MAJOR cannot carry the signal.
 
 While the contract is in v0.x (pre-1.0), breaking changes happen freely with MINOR bumps. Once v1.0 ships, breaking changes go through a one-MINOR-release deprecation cycle.
 
@@ -707,6 +720,16 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.7.5 — 2026-08-13
+
+Doc-only (§1/§7): resolved a self-contradiction in `LIB_<X>_ABI_VERSION`. §1 defined it as "bumped on any breaking export change" **and** "matches the MAJOR bump"; §7 repeated "matches the MAJOR component" while also stating that pre-1.0 breaking changes ride MINOR bumps. Those cannot all hold: a pre-1.0 library that breaks its surface keeps MAJOR at `0`, so an ABI equate mirroring MAJOR also stays `0` and never signals the breakage. §7's own example compounded it by gating on `!= 1`, a value unreachable under "matches MAJOR" for any 0.x library.
+
+The equate is now defined on its own terms — a monotonic generation counter for the exported surface, starting at **1**, incremented on any breaking export change, explicitly independent of MAJOR — with the reason stated: §7 permits pre-1.0 breakage on MINOR, so MAJOR carries no signal and cannot be the gate.
+
+This documents what three of four adopters already shipped (`c64-x25519`, `c64-ChaCha20-Poly1305`, `c64-polyval` all export `1` against MAJOR `0`); `c64-nist-curves` followed the literal text, shipped `0`, and became the outlier. The cost was measured rather than theoretical: its v0.9.0 removed 17 exported symbols across two ABI-surface changes on a MINOR bump ([c64-nist-curves#90](https://github.com/JC-000/c64-nist-curves/issues/90), [#91](https://github.com/JC-000/c64-nist-curves/issues/91)) with the equate unchanged at `0`, so consumer guards written to catch exactly that stayed silent — the failure the gate exists to prevent, caused by the spec's own wording. Its bump to `1` is tracked as [c64-nist-curves#95](https://github.com/JC-000/c64-nist-curves/issues/95).
+
+PATCH per §7 — doc-only, and the clause it replaces had no coherent prior meaning to break; three of four adopters already conform to the statement as now written. Same shape as the 0.7.3 §8.0 bit-constant clarification. Resolves [JC-000/c64-lib-contract#66](https://github.com/JC-000/c64-lib-contract/issues/66).
 
 ### 0.7.4 — 2026-08-13
 
