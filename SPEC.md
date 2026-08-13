@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.7.0 (2026-08-12)
+**Version:** 0.7.1 (2026-08-12)
 **Status:** Draft — under joint review by adopters and consumers.
 
 ## 0. Scope and audience
@@ -78,7 +78,7 @@ Where a consumer pins to a specific library version via git submodule SHA, the `
 
 ## 2. Zero-page contract
 
-Every library that claims any ZP slots MUST publish them as `.exportzp`-ed equates in a dedicated `src/zp_config.s` (or `.inc`) file. Each equate MUST be `.ifndef`-guarded so a consumer can override the slot via `ca65 --asm-define <slot>=$<addr>`.
+Every library that claims any ZP slots MUST publish them as `.exportzp`-ed equates in a dedicated `src/zp_config.s` (or `.inc`) file. Each equate MUST be `.ifndef`-guarded so a consumer can override the slot via `ca65 -D <slot>=$<addr>`.
 
 **Naming convention:** `<lib_prefix>_<role>`, lower-case (e.g., `fp_src1`, `cc20_state`, `x25519_w_lo`). The prefix keeps slots from colliding across libraries when a consumer links several.
 
@@ -98,10 +98,12 @@ Every library that claims any ZP slots MUST publish them as `.exportzp`-ed equat
 **Consumer override:**
 
 ```sh
-ca65 --asm-define fp_src1=$40 --asm-define fp_src2=$44 ...
+ca65 -D fp_src1=$40 -D fp_src2=$44 ...
 ```
 
-The library's own standalone tests assemble with the defaults; the consumer relocates as needed via `--asm-define`.
+The library's own standalone tests assemble with the defaults; the consumer relocates as needed via `-D`.
+
+> **Flag spelling (normative for every snippet in this document).** The ca65 symbol-define flag is **`-D name[=value]`**. It is *not* `--asm-define` — that is `cl65`'s spelling for the same thing, which `cl65` forwards to ca65. Invoking `ca65 --asm-define ...` fails outright with `ca65: Unknown option: --asm-define` (measured, ca65 V2.18). Consumers driving the build through `cl65` may use either form; every `ca65` command line in §2, §3, §8.x and §13 uses `-D`.
 
 ## 3. REU layout contract
 
@@ -125,7 +127,7 @@ If a library uses any 17xx-series RAM Expansion Unit (REU) banks for precompute 
 **Consumer override:**
 
 ```sh
-ca65 --asm-define X25519_REU_BANK=$03 ...
+ca65 -D X25519_REU_BANK=$03 ...
 ```
 
 **Aggregate bitmask:** the library MUST also export a `LIB_<X>_REU_BANKS_USED` bitmask equate listing every REU bank the library claims. Consumers compose these per-library masks at assemble time:
@@ -136,7 +138,7 @@ ca65 --asm-define X25519_REU_BANK=$03 ...
 .assert (LIB_NISTCURVES_REU_BANKS_USED & LIB_X25519_REU_BANKS_USED) = 0, error, "REU bank collision"
 ```
 
-Consumers MAY relocate any library's REU base via `--asm-define` to resolve a collision. The aggregate mask makes collisions visible at assemble time rather than runtime.
+Consumers MAY relocate any library's REU base via `-D` to resolve a collision. The aggregate mask makes collisions visible at assemble time rather than runtime.
 
 ## 4. Segment naming
 
@@ -206,7 +208,7 @@ While the contract is in v0.x (pre-1.0), breaking changes happen freely with MIN
 
 ## 8. Shared primitives
 
-Some primitives are reimplemented identically across multiple sibling libraries. When a consumer links several of those libraries into the same PRG, each one defines its own copy of the table at its own address, wasting resident RAM and boot cycles, and — more importantly — making the placement decision per-library rather than per-consumer. This section names primitives where the duplication has been confirmed across at least two adopters, fixes the *shape* every implementation must agree on, and leaves the *address* to the consumer via the `--asm-define` override mechanism already established in §2 and §3.
+Some primitives are reimplemented identically across multiple sibling libraries. When a consumer links several of those libraries into the same PRG, each one defines its own copy of the table at its own address, wasting resident RAM and boot cycles, and — more importantly — making the placement decision per-library rather than per-consumer. This section names primitives where the duplication has been confirmed across at least two adopters, fixes the *shape* every implementation must agree on, and leaves the *address* to the consumer via the `-D` override mechanism already established in §2 and §3.
 
 A primitive listed here is opt-in per library: an adopter MAY continue to ship its own private copy until it migrates. Once migrated, the library reflects ownership of the primitive in its `LIB_<X>_SHARED_PRIMITIVES` bitmask manifest equate (§5) — *conditionally*, so a build that defers the primitive to a canonical provider drops the bit (§8.0) — letting consumers detect double-ownership at assemble time.
 
@@ -487,12 +489,12 @@ sqtab_hi = LIB_SHARED_SQTAB_BASE + $0200
 .assert sqtab_hi = sqtab_lo + $0200,        error, "sqtab_hi must follow sqtab_lo by $0200"
 ```
 
-The `.ifndef` guard lets the library assemble standalone with its existing default; the consumer overrides via `ca65 --asm-define LIB_SHARED_SQTAB_BASE=$<addr>`. The two `.assert`s catch misconfigurations at assemble time:
+The `.ifndef` guard lets the library assemble standalone with its existing default; the consumer overrides via `ca65 -D LIB_SHARED_SQTAB_BASE=$<addr>`. The two `.assert`s catch misconfigurations at assemble time:
 
 - `LIB_SHARED_SQTAB_BASE & $00ff == 0` — CT-strict `abs,x` indexing requires a page-aligned base for cycle-stable loads.
 - `sqtab_hi - sqtab_lo == $0200` — adopters that dispatch via self-modifying code on the lo→hi delta fold this constant into the opcode hi-byte patching; alternative deltas silently miscompute.
 
-The contract pins *shape*, not *placement*. A consumer linking multiple sqtab-using libraries supplies one `--asm-define LIB_SHARED_SQTAB_BASE=$<addr>` and the libraries agree.
+The contract pins *shape*, not *placement*. A consumer linking multiple sqtab-using libraries supplies one `-D LIB_SHARED_SQTAB_BASE=$<addr>` and the libraries agree.
 
 **Init.** The canonical init entry point is `mul_tables_init`. It populates both tables from the quarter-square recurrence and MUST be idempotent — calling it twice produces the same table state and has no side effects beyond the table bytes.
 
@@ -522,7 +524,7 @@ The string `"sqtab"` is **normative**; adopters MUST NOT substitute a library-pr
 
 ### 8.2 Shared 8×8→16 REU multiplication table (`reu_mul`)
 
-**Failure mode this prevents.** The 128 KB 8×8→16 multiplication table at the heart of every multi-precision field-arithmetic loop is currently built and stashed in REU by both `c64-nist-curves` and `c64-x25519`. At each library's default `--asm-define` setting both lay it down at REU banks `$00`/`$01` with byte-identical row layout (see [JC-000/c64-lib-contract#10](https://github.com/JC-000/c64-lib-contract/issues/10) for the audit). A consumer that links both libraries into a single PRG either silently collides on the same 128 KB or — after `--asm-define`-relocating one of them — wastes 128 KB of REU plus ~3-6 s of cold-boot init on a redundant build of the same table. This clause gives the consumer one placement point so the duplication becomes recoverable from the consumer's cfg.
+**Failure mode this prevents.** The 128 KB 8×8→16 multiplication table at the heart of every multi-precision field-arithmetic loop is currently built and stashed in REU by both `c64-nist-curves` and `c64-x25519`. At each library's default `-D` setting both lay it down at REU banks `$00`/`$01` with byte-identical row layout (see [JC-000/c64-lib-contract#10](https://github.com/JC-000/c64-lib-contract/issues/10) for the audit). A consumer that links both libraries into a single PRG either silently collides on the same 128 KB or — after `-D`-relocating one of them — wastes 128 KB of REU plus ~3-6 s of cold-boot init on a redundant build of the same table. This clause gives the consumer one placement point so the duplication becomes recoverable from the consumer's cfg.
 
 **Semantics.** 256 rows × 512 bytes occupying two contiguous REU banks (128 KB) starting at the chosen base. Each row is laid out as:
 
@@ -546,7 +548,7 @@ LIB_SHARED_REU_MUL_BANKS_USED = (1 .shl LIB_SHARED_REU_MUL_BANK) | (1 .shl (LIB_
 .assert LIB_SHARED_REU_MUL_BANK < $FE,     error, "reu_mul base bank must leave room for the hi-half bank at base+1"
 ```
 
-The `.ifndef` guards let each library assemble standalone with its existing default; the consumer overrides via `ca65 --asm-define LIB_SHARED_REU_MUL_BANK=$<bank>` once and all consuming libraries agree. The `.assert`s catch misconfigurations at assemble time:
+The `.ifndef` guards let each library assemble standalone with its existing default; the consumer overrides via `ca65 -D LIB_SHARED_REU_MUL_BANK=$<bank>` once and all consuming libraries agree. The `.assert`s catch misconfigurations at assemble time:
 
 - `LIB_SHARED_REU_MUL_OFFSET = $0000` — current adopters require start-of-bank for row-stride math. Annotated as a v0.x.0 constraint; loosen only on a justified non-zero need from a future adopter.
 - `LIB_SHARED_REU_MUL_BANK < $FE` — the table claims two contiguous banks (`base` and `base + 1`), so `base = $FF` has no successor.
@@ -660,6 +662,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.7.1 — 2026-08-12
+
+Doc-only: fixed every consumer-override snippet to use ca65's actual symbol-define flag **`-D name[=value]`** instead of `--asm-define`, which ca65 rejects with `ca65: Unknown option: --asm-define`. `--asm-define` is `cl65`'s spelling, which `cl65` forwards to ca65 — presumably how the form entered the spec — but all eleven occurrences across ten lines (§2 ZP overrides, §3 REU bank overrides, §8's placement prose, §8.1 `LIB_SHARED_SQTAB_BASE`, §8.2 `LIB_SHARED_REU_MUL_BANK`) invoke `ca65` directly and so could not run as written. Measured on ca65 V2.18, the same version cited by the 0.4.2 entry below. Adds a normative flag-spelling note under §2's override block, since that is where the mechanism is first established and where a future snippet would copy from. Same defect class as [#41](https://github.com/JC-000/c64-lib-contract/issues/41)'s `.and`-vs-`&` collision asserts: a copy-paste-facing snippet in a copy-paste-facing document that does not work when copied. No contract change — no symbol, macro, section, or build-target semantics changed, and adopters were necessarily already using `-D` for their builds to work at all. Resolves [JC-000/c64-lib-contract#50](https://github.com/JC-000/c64-lib-contract/issues/50), found while testing the `LIB_NO_BARE_EXPORTS` define added in 0.7.0.
 
 ### 0.7.0 — 2026-08-12
 
