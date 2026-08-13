@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.6.0 (2026-08-12)
+**Version:** 0.6.1 (2026-08-12)
 **Status:** Draft — under joint review by adopters and consumers.
 
 ## 0. Scope and audience
@@ -589,6 +589,10 @@ See [consumers.md](consumers.md) for the list of consumer projects relying on th
 
 ## 12. Changelog
 
+### 0.6.1 — 2026-08-12
+
+Doc-only (§13.0): gave the `NET_FAMILY_*` family bits an explicit definition site. The v0.6.0 clause used the four constants in both its manifest and consumer-assert examples but never showed where they come from, leaving each adopter to invent a home for them — the one thing §13 exists to prevent. They are now specified as plain assemble-time equates in a shared `src/net/net_families.inc`, copied verbatim by adopters exactly as the §8.x bit constants are, and explicitly **not** `.export`ed: both sides of the link carry the header, and only exported symbols can collide (`NET_BACKEND_FAMILIES` remains the clause's sole export). Also corrected the §13.0 consumer-assert example from `error` to `lderror`: `NET_BACKEND_FAMILIES` is `.import`ed, so its value is not known until link, and the identical assert in §13.8 already used `lderror`. No contract change — bit values, symbol names, and family semantics are unchanged; the corrected assert form is the one §13.8 already specified.
+
 ### 0.6.0 — 2026-08-12
 
 Additive: new §13 "Network backend ABI" — the contract's first non-cryptographic chapter. Standardizes the symbol surface (§13.1: core / TCP / DNS / UDP families with per-entry calling conventions), the `NET_BACKEND_FAMILIES` capability bitmask (§13.0, append-only per the §8.0 discipline), the `net_last_error` namespace carve-up grandfathering the existing `UCI_ERR_*` values verbatim (§13.2), consumer-owned rx buffer contracts with a normative 16-bit-safe length rule (§13.3, motivated by the c64-https 255-byte TCP RX clamp defect, c64-https PR #27), the wall-clock-bounded-wait rule (§13.4, motivated by the c64-https `feat/net-drain-abi` cycle-budget failure at turbo), adapter-internal ZP discipline (§13.5), the UCI inter-access fence floor as a conformance requirement (§13.6, empirically bracketed 51.6 µs FAIL / 62.9 µs PASS at 64 MHz on C64 Ultimate), the fixed-address blob backend declaration pattern for position-linked driver blobs like ip65 (§13.7, explicitly contrasted with §4 relocatable segment libraries), and the `net_abi_asserts` conformance-check pattern (§13.8). Motivated by confirmed fork-and-drift between the two consumers: `c64-wireguard` copied `c64-https`'s `net_abi.inc` pattern and the surfaces have since diverged in naming (`net_dhcp` vs `net_dhcp_acquire`), data-passing conventions, ZP-helper exposure, and — most costly — robustness (`c64-wireguard`'s UCI adapter predates the bounded-wait, phantom-socket, and widened-fence hardening in `c64-https`; its `uci_errors.inc` is an older copy missing `UCI_ERR_NO_SOCKET` / `UCI_ERR_WAIT_TIMEOUT`). §13 is a **level-1** standardization: it governs in-consumer adapter surfaces; packaged `LIB_NET_<B>_*` archives (level 2) are a future promotion gated on adapter stabilization. Consumer alignment tracked via per-consumer intake issues (§13.8): [c64-https#70](https://github.com/JC-000/c64-https/issues/70), [c64-wireguard#48](https://github.com/JC-000/c64-wireguard/issues/48). MINOR bump: purely additive; no existing section renumbered, no symbol or semantics of §1–§12 changed.
@@ -657,17 +661,31 @@ Backend functionality is organized in **families**. A backend implements the cor
 | `$0004` | `NET_FAMILY_UDP` | UDP sockets | `net_udp_listen`, `net_udp_send`, UDP rx buffer (§13.3) |
 | `$0008` | `NET_FAMILY_DNS` | name resolution | `net_dns_resolve`, `net_resolved_ip` |
 
+**Definition site.** The four `NET_FAMILY_*` constants are plain assemble-time equates — never `.export`ed — and live in one header that both the backend manifest and every family-asserting consumer `.include`:
+
+```asm
+; src/net/net_families.inc — included by the backend manifest and by consumers
+NET_FAMILY_CORE = $0001
+NET_FAMILY_TCP  = $0002
+NET_FAMILY_UDP  = $0004
+NET_FAMILY_DNS  = $0008
+```
+
+Keeping them unexported is deliberate: both sides of the link carry the header, and only exported symbols can collide at link time. `NET_BACKEND_FAMILIES` is the sole exported symbol in §13.0 and is per-backend, so a consumer linking two backends is a configuration error the linker will name rather than a naming defect in this clause (contrast the unprefixed §1/§8.4 manifest exports in [#43](https://github.com/JC-000/c64-lib-contract/issues/43)). Adopters copy the block verbatim rather than deriving the values, exactly as the §8.x bit constants are copied.
+
 ```asm
 ; src/net/<backend>/net_manifest.s
+.include "net_families.inc"
 .export NET_BACKEND_FAMILIES
 NET_BACKEND_FAMILIES = NET_FAMILY_CORE | NET_FAMILY_TCP | NET_FAMILY_DNS
 ```
 
-Bits are append-only and never reused, per the §8.0 discipline. `NET_FAMILY_CORE` is mandatory: a backend that cannot init, acquire an address, and be pumped is not a backend. A consumer asserts its needs at assemble time:
+Bits are append-only and never reused, per the §8.0 discipline. `NET_FAMILY_CORE` is mandatory: a backend that cannot init, acquire an address, and be pumped is not a backend. A consumer asserts its needs against the linked backend:
 
 ```asm
+.include "net_families.inc"
 .import NET_BACKEND_FAMILIES
-.assert (NET_BACKEND_FAMILIES & (NET_FAMILY_CORE | NET_FAMILY_UDP)) = (NET_FAMILY_CORE | NET_FAMILY_UDP), error, "this consumer needs a UDP-capable backend"
+.assert (NET_BACKEND_FAMILIES & (NET_FAMILY_CORE | NET_FAMILY_UDP)) = (NET_FAMILY_CORE | NET_FAMILY_UDP), lderror, "this consumer needs a UDP-capable backend"
 ```
 
 **DNS family note.** A backend MAY implement `NET_FAMILY_DNS` by deferral: the UCI firmware resolves hostnames inside `TCP_CONNECT`, so its `net_dns_resolve` stages the hostname and performs no I/O (§13.1). Deferral still sets the `$0008` bit — the consumer-visible behavior ("I can pass a hostname and connect to it") is what the bit declares, not the wire mechanism.
