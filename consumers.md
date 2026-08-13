@@ -6,8 +6,8 @@ This page tracks downstream projects that rely on the [c64-lib-contract](SPEC.md
 
 | Project | Status | Lead doc |
 |---|---|---|
-| [c64-https](https://github.com/JC-000/c64-https) | Integrated — contract alignment merged ([PR #55](https://github.com/JC-000/c64-https/pull/55), 2026-05-21: `libs/nistcurves` v0.3.0 + `libs/x25519` v0.6.0) | [docs/library-ingestion-architecture.md](https://github.com/JC-000/c64-https/blob/master/docs/library-ingestion-architecture.md) |
-| [c64-wireguard](https://github.com/JC-000/c64-wireguard) | Integrated & shipped — v1.0.0 (2026-07-28) links `libs/x25519` v0.8.0 + `libs/chacha20poly1305` v0.6.0 via §6 archives, §8.0 composition (x25519 owns sqtab/reu_mul/ct_mul), link-time §3/§8.0 asserts; interim gaps tracked upstream (chacha #47/#48, contract #41/#43) | [docs/library-ingestion-architecture.md](https://github.com/JC-000/c64-wireguard/blob/master/docs/library-ingestion-architecture.md) |
+| [c64-https](https://github.com/JC-000/c64-https) | Integrated — contract alignment merged ([PR #55](https://github.com/JC-000/c64-https/pull/55), 2026-05-21: `libs/nistcurves` v0.3.0 + `libs/x25519` v0.6.0). §13 net-ABI: origin surface; intake items per SPEC §13.8 ([c64-https#70](https://github.com/JC-000/c64-https/issues/70)) | [docs/library-ingestion-architecture.md](https://github.com/JC-000/c64-https/blob/master/docs/library-ingestion-architecture.md) |
+| [c64-wireguard](https://github.com/JC-000/c64-wireguard) | Integrated & shipped — v1.0.0 (2026-07-28) links `libs/x25519` v0.8.0 + `libs/chacha20poly1305` v0.6.0 via §6 archives, §8.0 composition (x25519 owns sqtab/reu_mul/ct_mul), link-time §3/§8.0 asserts; interim gaps tracked upstream (chacha #47/#48, contract #41/#43). §13 net-ABI: forked surface; alignment + UCI-adapter resync per SPEC §13.8 ([c64-wireguard#48](https://github.com/JC-000/c64-wireguard/issues/48)) | [docs/library-ingestion-architecture.md](https://github.com/JC-000/c64-wireguard/blob/master/docs/library-ingestion-architecture.md) |
 
 ## How to add your project
 

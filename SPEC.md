@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.5.0 (2026-07-28)
+**Version:** 0.6.0 (2026-08-12)
 **Status:** Draft — under joint review by adopters and consumers.
 
 ## 0. Scope and audience
@@ -573,6 +573,8 @@ Adopters include this bit in their `LIB_<X>_SHARED_PRIMITIVES` manifest equate u
 
 - **2026-05-20 — v0.1.0.** Contract published with the six core sections (§1–§6); adopters land iteratively. Tracking issues filed against each adopter library.
 - **2026-05-20 → 2026-06-20 — v0.2.0–v0.4.0.** Additive growth: §7 semver expectations and §8 shared primitives (§8.0 precalc-table enumeration, §8.1 `sqtab`, §8.2 `reu_mul`, §8.3 `ct_mul_8x8`). See §12 for the per-release detail.
+- **2026-07-28 — v0.5.0.** Additive: §8.0/§5 three-state build-config semantics for shared primitives (owner / deferring consumer / non-consumer) plus the companion `LIB_<X>_SHARED_CONSUMES` mask and its consumer-side coverage assert.
+- **2026-08-12 — v0.6.0.** Additive: §13 network backend ABI — the first non-cryptographic chapter, standardizing the symbol surface and device-timing semantics both consumers had independently forked for their ip65/UCI networking adapters.
 - **v1.0 — target: when all current adopters (see [adopters.md](adopters.md)) have landed every applicable section, core and shared-primitive.** Contract is then stable; breaking changes go through a deprecation cycle.
 
 The v1.0 cutover triggers a coordinated tag bump (every adopter to `LIB_ABI_VERSION = 1`) so consumers can pin against `LIB_ABI_VERSION >= 1` and know the full contract surface is present.
@@ -586,6 +588,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.6.0 — 2026-08-12
+
+Additive: new §13 "Network backend ABI" — the contract's first non-cryptographic chapter. Standardizes the symbol surface (§13.1: core / TCP / DNS / UDP families with per-entry calling conventions), the `NET_BACKEND_FAMILIES` capability bitmask (§13.0, append-only per the §8.0 discipline), the `net_last_error` namespace carve-up grandfathering the existing `UCI_ERR_*` values verbatim (§13.2), consumer-owned rx buffer contracts with a normative 16-bit-safe length rule (§13.3, motivated by the c64-https 255-byte TCP RX clamp defect, c64-https PR #27), the wall-clock-bounded-wait rule (§13.4, motivated by the c64-https `feat/net-drain-abi` cycle-budget failure at turbo), adapter-internal ZP discipline (§13.5), the UCI inter-access fence floor as a conformance requirement (§13.6, empirically bracketed 51.6 µs FAIL / 62.9 µs PASS at 64 MHz on C64 Ultimate), the fixed-address blob backend declaration pattern for position-linked driver blobs like ip65 (§13.7, explicitly contrasted with §4 relocatable segment libraries), and the `net_abi_asserts` conformance-check pattern (§13.8). Motivated by confirmed fork-and-drift between the two consumers: `c64-wireguard` copied `c64-https`'s `net_abi.inc` pattern and the surfaces have since diverged in naming (`net_dhcp` vs `net_dhcp_acquire`), data-passing conventions, ZP-helper exposure, and — most costly — robustness (`c64-wireguard`'s UCI adapter predates the bounded-wait, phantom-socket, and widened-fence hardening in `c64-https`; its `uci_errors.inc` is an older copy missing `UCI_ERR_NO_SOCKET` / `UCI_ERR_WAIT_TIMEOUT`). §13 is a **level-1** standardization: it governs in-consumer adapter surfaces; packaged `LIB_NET_<B>_*` archives (level 2) are a future promotion gated on adapter stabilization. Consumer alignment tracked via per-consumer intake issues (§13.8): [c64-https#70](https://github.com/JC-000/c64-https/issues/70), [c64-wireguard#48](https://github.com/JC-000/c64-wireguard/issues/48). MINOR bump: purely additive; no existing section renumbered, no symbol or semantics of §1–§12 changed.
 
 ### 0.5.0 — 2026-07-28
 
@@ -626,3 +632,185 @@ Additive: new §8 "Shared primitives" with the first entry §8.1 covering the 8�
 ### 0.1.0 — 2026-05-20
 
 Initial draft. Extracted from `c64-https/docs/library-ingestion-architecture.md` §2 (target architecture) and §3 (library-side feature requests), generalized for cross-consumer scope. Coordinated with `c64-wireguard`'s parallel restructuring work — first three adopter-side issues (`c64-x25519#43`, `c64-x25519#44`, `c64-ChaCha20-Poly1305#26`) were filed by `c64-wireguard` and endorsed by `c64-https`; remaining nine adopter-side issues were filed by `c64-https` (see adopters.md for full tracking).
+
+## 13. Network backend ABI
+
+> Numbering note: §13 is appended after the §12 changelog rather than inserted before §9 so that no existing section is renumbered — §2/§3/§4/§8.x are referenced by name from adopter and consumer cfgs, docs, and commit messages. New chapters continue from §13.
+
+This chapter is the contract's first non-cryptographic chapter. It standardizes the symbol surface and device-timing semantics of **network backends** — the adapter layers that put a C64 on a network — so that a consumer can switch backends at link time and so that hard-won device-timing fixes propagate across consumers instead of rotting in forks.
+
+- A **network backend** is an adapter (`src/net/<backend>/`) plus the driver it fronts: today, `ip65` (RR-Net / cs8900a, driven via a position-linked binary blob) and `uci` (Ultimate 64 / U64E / C64 Ultimate command interface at `$DF1B-$DF1F`).
+- The consumer-facing surface is a single `net_abi.inc` of `.import`ed symbols. Swapping backends is a link-line + cfg choice; higher layers (TLS, HTTP, WireGuard handshake/transport) do not change.
+
+**Why this chapter exists.** Both current consumers confirmed the duplication the hard way: `c64-wireguard` copied `c64-https`'s `net_abi.inc` pattern and the two surfaces then drifted — divergent names for the same operation (`net_dhcp` vs `net_dhcp_acquire`), divergent data-passing conventions, adapter internals leaking into one public surface but not the other, and — most costly — **robustness divergence**: `c64-wireguard`'s UCI adapter is a snapshot that predates `c64-https`'s bounded-wait conversion, phantom-socket detection, and widened inter-access fence, so wedge classes already fixed in one consumer remain live in the other (its `uci_errors.inc` is an older copy missing `UCI_ERR_NO_SOCKET` and `UCI_ERR_WAIT_TIMEOUT`). This chapter pins the union surface and the semantics that were previously folklore.
+
+**Scope (level 1 vs level 2).** v0.6.0 governs the *symbol surface and semantics* of adapters that live in-consumer (level 1). Packaging backends as relocatable `LIB_NET_<B>_*` archives per §4/§6 (level 2) is a future promotion, gated on the adapters stabilizing; §13.7 already defines the declaration pattern for the part that can never be §4-relocatable (the position-linked ip65 blob).
+
+### 13.0 Families and capability declaration
+
+Backend functionality is organized in **families**. A backend implements the core family plus any subset of the others, and declares what it implements via an exported manifest equate:
+
+| Bit | Constant | Family | Surface |
+|---|---|---|---|
+| `$0001` | `NET_FAMILY_CORE` | lifecycle + addressing | `net_init`, `net_dhcp_acquire`, `net_poll`, `net_local_ip`, `net_last_error` |
+| `$0002` | `NET_FAMILY_TCP` | TCP client | `net_tcp_connect`, `net_tcp_send`, `net_tcp_close`, `net_tcp_state`, TCP rx ring (§13.3) |
+| `$0004` | `NET_FAMILY_UDP` | UDP sockets | `net_udp_listen`, `net_udp_send`, UDP rx buffer (§13.3) |
+| `$0008` | `NET_FAMILY_DNS` | name resolution | `net_dns_resolve`, `net_resolved_ip` |
+
+```asm
+; src/net/<backend>/net_manifest.s
+.export NET_BACKEND_FAMILIES
+NET_BACKEND_FAMILIES = NET_FAMILY_CORE | NET_FAMILY_TCP | NET_FAMILY_DNS
+```
+
+Bits are append-only and never reused, per the §8.0 discipline. `NET_FAMILY_CORE` is mandatory: a backend that cannot init, acquire an address, and be pumped is not a backend. A consumer asserts its needs at assemble time:
+
+```asm
+.import NET_BACKEND_FAMILIES
+.assert (NET_BACKEND_FAMILIES & (NET_FAMILY_CORE | NET_FAMILY_UDP)) = (NET_FAMILY_CORE | NET_FAMILY_UDP), error, "this consumer needs a UDP-capable backend"
+```
+
+**DNS family note.** A backend MAY implement `NET_FAMILY_DNS` by deferral: the UCI firmware resolves hostnames inside `TCP_CONNECT`, so its `net_dns_resolve` stages the hostname and performs no I/O (§13.1). Deferral still sets the `$0008` bit — the consumer-visible behavior ("I can pass a hostname and connect to it") is what the bit declares, not the wire mechanism.
+
+**Poll-pump model (normative).** Consumers drive the backend by calling `net_poll` from their main loop. A backend MUST NOT require interrupt service to make progress, and MUST tolerate arbitrarily long gaps between pumps: packets that arrive while the consumer is not pumping MAY be dropped (TCP recovery is the peer's retransmission; UDP recovery is the protocol's own loss tolerance). This is load-bearing for cryptographic consumers whose compute stalls reach minutes at stock clock — a TLS CertificateVerify at 1 MHz can leave the network unpumped for 20+ minutes, and the contract's answer is "drops are legal; the transport recovers," not "the adapter must buffer everything."
+
+### 13.1 Symbol surface
+
+Union surface across both consumers. Where the two existing surfaces conflicted, `c64-https` naming wins (it is the older and more hardened adapter pair); the per-consumer renames are tracked as §13.8 intake items. All flag/error semantics follow §13.2.
+
+**Core family** (required):
+
+| Symbol | Kind | Convention |
+|---|---|---|
+| `net_init` | entry | No arguments. Detect + initialize the device/driver. C=0 ok; C=1 fail with `net_last_error` set. |
+| `net_dhcp_acquire` | entry | No arguments. Acquire a lease; populates `net_local_ip`. C flag per §13.2. Backends on multi-interface devices SHOULD probe all interfaces and take the first lease (cf. the C64 Ultimate WiFi/Ethernet fallback). |
+| `net_poll` | entry | No arguments. Pump one unit of driver work (process ≤ 1 inbound packet / drain ≤ 1 firmware read chunk). C=1 only on backend error; **C=0 carries no "data arrived" meaning** — data availability is observed through the §13.3 buffers. Clobbers A/X/Y. |
+| `net_local_ip` | data, 4 B | Local IPv4 address after `net_dhcp_acquire` succeeds. Zero before. |
+| `net_last_error` | data, 1 B | Last error code (§13.2). `$00` = no error. |
+
+**TCP family** (`NET_FAMILY_TCP`):
+
+| Symbol | Kind | Convention |
+|---|---|---|
+| `net_tcp_connect` | entry | A = port low byte, X = port high byte. The destination host was staged by a prior `net_dns_resolve` call. C flag per §13.2; on failure `net_tcp_state` reflects it. |
+| `net_tcp_send` | entry | A = data pointer low, X = high; `net_send_len` (2 B, exported data) = length. 16-bit lengths MUST be honored in full (§13.3). Short writes are best-effort: the backend records `NET_ERR`-class detail in `net_last_error` but returns C=0. |
+| `net_tcp_close` | entry | No arguments. Always leaves `net_tcp_state` = closed. |
+| `net_tcp_state` | data, 1 B | `$00` `NET_TCP_CLOSED`, `$01` `NET_TCP_CONNECTED`, `$02` `NET_TCP_ERROR`, `$03` `NET_TCP_CONNECT_FAIL`. Values are normative (they are the existing `UCI_TCP_*` values, name-promoted). |
+| rx ring | data | See §13.3. |
+
+**DNS family** (`NET_FAMILY_DNS`):
+
+| Symbol | Kind | Convention |
+|---|---|---|
+| `net_dns_resolve` | entry | A/X = pointer to NUL-terminated hostname (dotted-quad literals MUST pass through). Resolution MAY be lazy: a deferring backend stages the name for `net_tcp_connect` and cannot fail here; an eager backend resolves immediately. C flag per §13.2. |
+| `net_resolved_ip` | data, 4 B | All-zero = not resolved; `$FF,$FF,$FF,$FF` = resolved internally by the device (deferral marker); anything else = the resolved address. Consumers MUST NOT treat the deferral marker as an address. |
+
+**UDP family** (`NET_FAMILY_UDP`) — standardized from the `c64-wireguard` surface with adapter-internal and consumer-specific leaks removed:
+
+| Symbol | Kind | Convention |
+|---|---|---|
+| `net_udp_listen` | entry | A = local port low, X = high. Binds and arms inbound delivery into the §13.3 UDP rx buffer. C flag per §13.2. |
+| `net_udp_send` | entry | `net_udp_send_ptr` (2 B) = payload pointer, `net_udp_send_len` (2 B) = length, `net_udp_dest_ip` (4 B) + `net_udp_dest_port` (2 B) = destination — all exported ABI data, set by the caller before the call. C flag per §13.2. |
+| rx buffer | data | See §13.3. |
+
+**Deliberately not in the contract:**
+
+- `net_tcp_set_recv_cb` — an RTS stub with zero in-tree callers in `c64-https`; the drain model (§13.3) is the contract. Retired rather than standardized.
+- `net_udp_recv_cb` — adapter-internal wiring (it is the function the *driver* calls); exporting it invites consumers to call it. Internal.
+- `net_save_zp` / `net_restore_zp` — see §13.5.
+- `net_print_ip` — a consumer UI helper, not backend functionality.
+- `wg_peer_ip` / `wg_peer_port` as send destinations — consumer state read by an adapter is a layering inversion; replaced by `net_udp_dest_ip` / `net_udp_dest_port` owned by the ABI.
+
+### 13.2 Error and state convention
+
+Every entry point returns C=0 on success and C=1 on failure with `net_last_error` holding a nonzero code. Two normative refinements:
+
+- **"No data" is not an error.** `net_poll` with nothing to do, an empty rx ring, an unset ready flag — all are C=0 conditions observed through data, not flags. (This retires `c64-wireguard`'s "C=0 = packet processed" `net_poll` meaning, the one place the two consumers' flag semantics genuinely conflicted.)
+- **Callers MUST propagate.** Adapter-internal helpers that can time out (§13.4) return C=1; every call site either handles or `bcs`-propagates. An adapter that swallows a timeout wedges the machine one layer up.
+
+**`net_last_error` namespace.** `$00` = OK. The range is carved so codes identify their origin at a glance and existing values stay valid verbatim:
+
+| Range | Owner |
+|---|---|
+| `$01-$3F` | Contract-generic codes (none allocated yet; future §13 revisions allocate here) |
+| `$40-$7F` | ip65-family backends |
+| `$80-$BF` | UCI-family backends — the existing `UCI_ERR_*` values (`$81-$89`) are grandfathered unchanged |
+| `$C0-$FF` | Consumer-private experiments; never allocated by this contract |
+
+A backend MUST emit only `$00` or codes from its own family range.
+
+### 13.3 Buffer ownership and 16-bit-safe lengths
+
+Rx buffers are **consumer-owned**: the consumer's cfg places them; the backend imports the symbols. This keeps placement decisions per-consumer (the same reason §8.1 pins shape, not address).
+
+**TCP rx ring** (`NET_FAMILY_TCP`):
+
+| Symbol | Kind | Semantics |
+|---|---|---|
+| `tcp_recv_buf` | equate | Ring base address. |
+| `TCP_RECV_MASK` | equate | Ring size − 1. MUST be a power-of-two minus one: `.assert (TCP_RECV_MASK & (TCP_RECV_MASK + 1)) = 0`. |
+| `tcp_recv_head` | data, 2 B | Consumer read position (16-bit, masked). |
+| `tcp_recv_tail` | data, 2 B | Backend write position (16-bit, masked). |
+| `tcp_recv_overflow` | data, 1 B | Set to 1 by the backend when the ring fills; the backend then drops. Consumers SHOULD surface it in diagnostics. |
+
+The backend appends at tail; the consumer drains at head; empty iff head = tail (16-bit compare).
+
+**UDP rx buffer** (`NET_FAMILY_UDP`): `udp_recv_buf` (consumer-sized), `udp_recv_len` (2 B), `udp_recv_ready` (1 B flag). The backend copies one datagram and sets `udp_recv_ready`; the consumer clears it after draining. Delivery while `udp_recv_ready` is still set is backend-defined in v0.6.0 (the current adapter overwrites); a future revision may tighten this to drop-while-ready — flagged as an open point rather than silently divergent.
+
+**16-bit-safe lengths (normative).** Every rx copy path and every send path MUST handle 16-bit lengths in full. **Failure mode this prevents:** the original `c64-https` ip65 rx callback truncated `cb_remaining` to 255 when the high byte was nonzero while the driver ACKed the full length — every TLS record over 255 B was silently partially delivered, and record reassembly glued a prefix of record N onto bytes of record N+1 (fixed in c64-https PR #27). The bug class is a one-byte-register habit on a two-byte quantity; the contract makes the 16-bit obligation explicit so review catches it.
+
+### 13.4 Bounded waits (wall-clock, never cycle-counted)
+
+Any adapter loop that waits on device state (status registers, response drains, data-available flags) MUST bound the wait using a **wall-clock time source** — CIA TOD or timer — and MUST NOT use cycle-counted iteration budgets. On expiry: C=1, `net_last_error` = the backend's timeout code (UCI-family: `UCI_ERR_WAIT_TIMEOUT`).
+
+**Failure mode this prevents.** Per-iteration cost scales with CPU clock while device-side operation durations do not. A cycle-counted budget tuned at 1 MHz collapses at 48-64 MHz turbo: `c64-https`'s abandoned `feat/net-drain-abi` branch split waits into fast/long tiers with cycle budgets and broke DHCP at turbo for exactly this reason. The unbounded alternative is worse — a wedged device converts to a wedged C64 (a real UCI FPGA wedge during CertificateVerify recv turned into a 1843 s test-sentinel timeout before the bounded conversion).
+
+The reference implementation is `c64-https`'s `uci_wait_idle`: sample CIA1 TOD at entry (read order HOUR→MIN→SEC→TENTHS to latch/unlatch), re-read TENTHS per spin pass, bail after a fixed number of transitions (~5 s default), state in SMC bytes where the adapter's no-ZP convention requires it. Consumers running at non-standard clocks get the same wall-clock bound for free.
+
+### 13.5 Zero-page discipline
+
+ZP save/restore around driver calls (e.g., preserving crypto ZP `$02-$1B` across ip65 calls whose callback fires mid-`ip65_process`) is **adapter-internal**. A backend MUST NOT export save/restore helpers as public surface — a consumer calling them out of order corrupts either the driver's or its own ZP state in ways that surface layers away from the cause. (`c64-wireguard`'s exported `net_save_zp` / `net_restore_zp` predate this rule; retiring them is a §13.8 intake item.) Backends declare their ZP claims per §2 like any other library.
+
+### 13.6 Device timing fences (UCI family)
+
+The UCI FPGA requires a minimum interval between consecutive register accesses regardless of CPU clock. At stock 1 MHz the bus cycle time satisfies it naturally; at turbo (4-64 MHz) the CPU outruns the FPGA, producing double-latched writes and stale reads that corrupt the command protocol — the signature is *silent* command loss (command accepted, no error bit, nothing on the wire; typically surfacing as `UCI_ERR_NO_SOCKET` on the first `TCP_CONNECT`).
+
+Conformance requirement for UCI-family backends: every register access is fenced, and the fence duration MUST meet the **empirically-bracketed floor across all supported devices**, not a single device's datasheet-ish number. The measured record, normative until a backend re-brackets it: the U64E needs ~38 µs; the C64 Ultimate ("Starlight", firmware 1.1.0/core 1.49) needs more, and its floor only bites under sustained `CMD_DATA` bursts — bracketed at 64 MHz as **51.6 µs FAIL / 62.9 µs PASS**. The reference parameters (`UCI_FENCE_OUTER = 5`, `UCI_FENCE_INNER = 217`, ≈85 µs at 64 MHz, ~35 % margin) are safe on both devices at every supported speed. Fence parameters are adapter-internal — consumers never see them — but shipping a fence below the bracketed floor is a conformance failure even if it happens to pass on one device: that is precisely how the U64E-era `INNER = 100` fence survived until the C64 Ultimate arrived.
+
+### 13.7 Fixed-address blob backends
+
+Some backends front a **position-linked driver blob** rather than relocatable code: the ip65 stack is prelinked to load at a fixed base (`$2000`, ~6.95 KB) with a fixed BSS span (`$4000-$4F8B`) and its own ZP claim (`$02-$1B`). This is the one part of a network backend that can never satisfy §4's segment-relocation model — ld65 places the blob as an opaque `.incbin`, not by segment name.
+
+A blob-backed backend MUST declare its fixed footprint as exported equates so consumer cfgs can compose around it at assemble time:
+
+```asm
+; src/net/<backend>/net_manifest.s (continued)
+.export LIB_NET_IP65_BLOB_BASE, LIB_NET_IP65_BLOB_SIZE
+.export LIB_NET_IP65_BLOB_BSS_BASE, LIB_NET_IP65_BLOB_BSS_SIZE
+LIB_NET_IP65_BLOB_BASE     = $2000
+LIB_NET_IP65_BLOB_SIZE     = $1B27          ; refreshed per blob rebuild
+LIB_NET_IP65_BLOB_BSS_BASE = $4000
+LIB_NET_IP65_BLOB_BSS_SIZE = $0F8C
+```
+
+**Relocation is a relink, not a cfg edit.** The blob is produced by a scripted ld65 relink of the driver's object libraries against a stub + cfg (`c64-https`'s `make ip65-blob` is the reference). A consumer whose memory map cannot host the default base regenerates the blob at its own base by parameterizing that build; the declaration equates above then change with it, and every consumer-side fit `.assert` re-checks automatically. Contrast with §4 libraries, where the consumer moves bytes by editing its own `SEGMENTS{}` block — for a blob backend the consumer moves bytes by rebuilding the blob.
+
+### 13.8 Conformance asserts and consumer intake
+
+Each consumer ships a `net_abi_asserts` translation unit (mirroring the §3/§8.0 checks in `c64-wireguard`'s `src/contract_asserts.s`) asserting at least:
+
+```asm
+.import NET_BACKEND_FAMILIES
+.assert (NET_BACKEND_FAMILIES & NET_FAMILY_CORE) = NET_FAMILY_CORE, lderror, "backend missing core family"
+.assert (NET_BACKEND_FAMILIES & NET_REQUIRED_FAMILIES) = NET_REQUIRED_FAMILIES, lderror, "backend missing a family this consumer needs"
+.assert (TCP_RECV_MASK & (TCP_RECV_MASK + 1)) = 0, error, "TCP ring mask must be 2^n - 1"   ; TCP consumers only
+```
+
+**Intake status at v0.6.0** — known non-conformances, tracked as per-consumer alignment issues:
+
+| Consumer | Items |
+|---|---|
+| `c64-https` ([#70](https://github.com/JC-000/c64-https/issues/70)) | De-facto surface members missing from `net_abi.inc` (`net_send_len`, the ring symbols, `net_recv_ready`/`net_recv_byte` drain helpers — declare or retire per §13.1/§13.3); `net_tcp_set_recv_cb` stub to delete; adopt `NET_TCP_*` state names (values unchanged); ship `net_manifest.s` + `net_abi_asserts`. |
+| `c64-wireguard` ([#48](https://github.com/JC-000/c64-wireguard/issues/48)) | Rename `net_dhcp` → `net_dhcp_acquire`; retire `net_poll`'s "C=0 = packet" meaning (§13.2); un-export `net_save_zp`/`net_restore_zp` (§13.5); replace `wg_peer_ip`/`wg_peer_port` reads in the adapter with `net_udp_dest_ip`/`net_udp_dest_port`; rename send globals to `net_udp_send_ptr`/`net_udp_send_len`; **resync the UCI adapter with `c64-https`'s hardened one** (bounded waits §13.4, fence floor §13.6, phantom-socket detection — its `uci_errors.inc` predates `$88`/`$89`); ship `net_manifest.s` + `net_abi_asserts`. |
+
+The resync item is the payoff case for this chapter: those fixes exist because real hardware wedged, and the contract's job is to make them travel.
