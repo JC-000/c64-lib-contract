@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.7.1 (2026-08-12)
+**Version:** 0.7.2 (2026-08-13)
 **Status:** Draft — under joint review by adopters and consumers.
 
 ## 0. Scope and audience
@@ -301,7 +301,7 @@ APP_OWNED = LIB_SHARED_PRIMITIVES_SQTAB   ; primitives provided by the consumer'
 .assert ((LIB_A_SHARED_CONSUMES | LIB_B_SHARED_CONSUMES) & ~(LIB_A_SHARED_PRIMITIVES | LIB_B_SHARED_PRIMITIVES | APP_OWNED)) = 0, error, "consumed shared primitive with no owner in the link"
 ```
 
-Without the coverage assert, the missing-provider failure mode is an ld65 unresolved external at best (when the deferring library imports the canonical entry point) and a silent wrong-result at worst (table read with no init); with it, the failure is a named assemble-time error. *Link-time note (v0.7.0):* importing manifest equates from two libraries used to collide on the unprefixed §1/§8.4 symbols ([#43](https://github.com/JC-000/c64-lib-contract/issues/43)). Adopters that have shipped the v0.7.0 prefixed forms compose directly: build every library with `ca65 -D LIB_NO_BARE_EXPORTS=1` and import the `LIB_<X>_*` equates from each. Against a library still on the bare-only forms, the §8.4 `od65 --dump-exports` out-of-band pattern remains the fallback for that library.
+Without the coverage assert, the missing-provider failure mode is an ld65 unresolved external at best (when the deferring library imports the canonical entry point) and a silent wrong-result at worst (table read with no init); with it, the failure is a named assemble-time error. *Link-time note (v0.7.0):* importing manifest equates from two libraries used to collide on the unprefixed §1/§8.4 symbols ([#43](https://github.com/JC-000/c64-lib-contract/issues/43)). Adopters that have shipped the v0.7.0 prefixed forms compose directly: build every library with `ca65 -D LIB_NO_BARE_EXPORTS=1` and import the `LIB_<X>_*` equates from each. Against a library still on the bare-only forms, the §8.4 `od65 --dump-exports` out-of-band pattern remains the fallback for that library — noting that `od65` reads objects, not archives, so a consumer holding only that library's shipped `.a` extracts its members first (§8.0, "Auditing a shipped archive").
 
 #### Catch loop: enumeration at adopter intake
 
@@ -317,7 +317,7 @@ Tables below this floor (ChaCha20 quarter-round constants, mod-n reduction one-o
 **Two-form enumeration.** Each enumerated table is recorded in *both* of the following forms:
 
 1. **Doc-level** in `docs/precalc-tables.md` (or equivalent path linked from the adopter's `adopters.md` row): name, size, region, source file, classification (curve-/algorithm-specific *or* potentially shareable), and the rationale for the classification. The rationale is the load-bearing field — writing it down forces the maintainer to think through whether a sibling library might converge on the same shape.
-2. **Assembler-level** via the `LIB_PRECALC_TABLE` macro (canonical source below). The macro emits three exported equates per invocation that survive doc rot and make build-time audits mechanical: `grep -r '_PRECALC_' src/` adopter-local, `od65 --dump-exports build/lib.o | grep _PRECALC_` post-build. (Audit on `_PRECALC_`, not `LIB_PRECALC_`: as of v0.7.0 the macro also emits the library-prefixed `LIB_<X>_PRECALC_<name>_*` form, which the older pattern would miss.) (cc65 toolchain; `od65` is the cc65 object-file inspector that reads ca65 `.o` and `.a` archives).
+2. **Assembler-level** via the `LIB_PRECALC_TABLE` macro (canonical source below). The macro emits three exported equates per invocation that survive doc rot and make build-time audits mechanical: `grep -r '_PRECALC_' src/` adopter-local, `od65 --dump-exports build/lib.o | grep _PRECALC_` post-build. (Audit on `_PRECALC_`, not `LIB_PRECALC_`: as of v0.7.0 the macro also emits the library-prefixed `LIB_<X>_PRECALC_<name>_*` form, which the older pattern would miss.) (cc65 toolchain; `od65` is the cc65 object-file inspector. It reads single ca65 `.o` files **only** — pointed at an `.a` archive it prints `<name>: (no xo65 object file)` and exits `0`, so a script that greps its output sees no symbols and silently reports a false negative rather than an error. To audit an archive, extract its members first — see "Auditing a shipped archive" below.)
 
 Both forms are required. The doc captures shape and rationale; the macro captures size, region, and sharing as build-time data. An asymmetry between the two (a `LIB_PRECALC_*` export with no `docs/precalc-tables.md` row, or vice versa) blocks the adopter PR per the intake-reviewer-MUST rule in `adopters.md`.
 
@@ -437,6 +437,18 @@ od65 --dump-exports build/*.o | grep _PRECALC_reu_mul
 ```
 
 This reports `LIB_<X>_PRECALC_reu_mul_SIZE`, `_REGION`, and `_SHARED` — plus the deprecated bare `LIB_PRECALC_reu_mul_*` triple while it is still emitted — with their exported values for any table size, including the 128 KB `reu_mul` and the 192 KB `reu_mul_doubled`. A consumer build script asserts the values it expects (`_SHARED = 1`, `_SIZE = 131072`) against this dump.
+
+Note the glob: **objects, not archives.** `build/*.o` is normative here — `od65` cannot read a `.a`, and against one it produces empty output with exit `0`, which a grep-based check cannot distinguish from "this library declares no such table."
+
+**Auditing a shipped archive.** A consumer holding only a distributed `.a` — the §6 minimal-archive build target, and exactly the case the out-of-band fallback in the §8.0 coverage-assert note points at — must resolve it to object files first. `ar65` enumerates and extracts members, so this needs no knowledge of the library's build layout:
+
+```sh
+mkdir -p /tmp/audit && cd /tmp/audit
+for m in $(ar65 t /path/to/lib.a); do ar65 x /path/to/lib.a "$m"; done
+od65 --dump-exports *.o | grep _PRECALC_
+```
+
+`ar65 t` lists the member names; `ar65 x` takes them explicitly (it extracts nothing when given an archive alone). An audit script SHOULD assert that the extraction produced at least one `.o`, so an empty or unreadable archive fails loudly instead of dropping through to a silent zero-match.
 
 > **Address-size limit (normative).** On the ca65 6502 target an *assemble-time* cross-check that `.import`s `LIB_PRECALC_<name>_SIZE` into a second translation unit and `.assert`s on it only works for tables **≤ 65 535 B**. ca65's `.import` accepts only the `: zp` (8-bit) and `: abs` (16-bit) address-size hints — there is no `: far` (24-bit) form — so importing the `_SIZE` of a larger table (e.g. `reu_mul` = 131072 B) raises `Range error (131072 not in [-32768..65535])` at the consumer. The producer-side `.export LIB_PRECALC_<name>_SIZE` equate is unaffected (ca65 `.export` accepts an absolute value of any width up to 32 bits — see the macro note in `precalc_table.inc`); only the *consuming* `.import` is constrained. For tables that fit, the assemble-time form is available:
 >
@@ -600,7 +612,7 @@ Adopters OR it into their `LIB_<X>_SHARED_PRIMITIVES` manifest equate (§5) and 
 LIB_PRECALC_TABLE "reu_mul", 131072, PRECALC_REGION_REU, PRECALC_SHARED_YES, "<X>"
 ```
 
-The string `"reu_mul"` is **normative**; adopters MUST NOT substitute a library-prefixed variant (e.g., `"nistcurves_reu_mul"` or `"x25519_reu_mul"`). The cross-adopter audit `od65 --dump-exports build/*.o | grep _PRECALC_reu_mul_SIZE` depends on every adopter exporting the same `_PRECALC_reu_mul_*` symbol family (the v0.7.0 library prefix goes in the fifth macro argument, never into the table name — see §8.1). (`od65` is the cc65 object-file inspector; ca65 `.o` files are not in ELF/Mach-O format so standard `nm` cannot read them. Symbol case is preserved from the macro argument — see §8.0.) Size (`131072`) and region (`PRECALC_REGION_REU`) are also normative — they are invariants of the shared shape — only placement (the `LIB_SHARED_REU_MUL_BANK` equate above) is consumer-chosen.
+The string `"reu_mul"` is **normative**; adopters MUST NOT substitute a library-prefixed variant (e.g., `"nistcurves_reu_mul"` or `"x25519_reu_mul"`). The cross-adopter audit `od65 --dump-exports build/*.o | grep _PRECALC_reu_mul_SIZE` depends on every adopter exporting the same `_PRECALC_reu_mul_*` symbol family (the v0.7.0 library prefix goes in the fifth macro argument, never into the table name — see §8.1). (`od65` is the cc65 object-file inspector; ca65 `.o` files are not in ELF/Mach-O format so standard `nm` cannot read them. It reads objects only — for a shipped `.a`, extract members first per §8.0. Symbol case is preserved from the macro argument — see §8.0.) Size (`131072`) and region (`PRECALC_REGION_REU`) are also normative — they are invariants of the shared shape — only placement (the `LIB_SHARED_REU_MUL_BANK` equate above) is consumer-chosen.
 
 **Worked consumer layout (TLS 1.3 stack).** A consumer that links `c64-nist-curves` (consumes §8.2 plus its own Lim-Lee comb at a private REU bank), `c64-x25519` (consumes §8.2 plus its own pre-doubled tables at private REU banks under `SQR_DMA_K > 0`), and `c64-ChaCha20-Poly1305` (consumes §8.1 sqtab only, no §8.2) might cfg as follows:
 
@@ -662,6 +674,14 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.7.2 — 2026-08-13
+
+Doc-only (§8.0/§8.2): corrected the claim that `od65` "reads ca65 `.o` and `.a` archives". It reads objects only. Pointed at an archive it prints `<name>: (no xo65 object file)` **and exits `0`** — so every grep-based audit the spec recommends produces zero matches and reports a clean pass, indistinguishable from "this library declares no such table." The false result is a false *negative*, which is the dangerous direction for a catch loop whose whole job is noticing that two adopters declare the same shared table. Reproduced on cc65 V2.18: `od65 --dump-exports lib.a` → `(no xo65 object file)`, exit `0`; the same members dumped as `.o` files list all six `_PRECALC_sqtab_*` equates.
+
+Adds an "Auditing a shipped archive" block giving the extraction pattern (`ar65 t` to enumerate members, `ar65 x` to extract each — `ar65 x` extracts nothing when given an archive alone), and a recommendation that audit scripts assert the extraction produced at least one object so an empty or unreadable archive fails loudly instead of dropping through to a silent zero-match. Marks the existing `build/*.o` globs as normative — objects, not archives — and fixes the §8.4 out-of-band fallback pointer, which was the practical trap: that fallback is aimed at consumers integrating a **shipped `.a`**, exactly the input `od65` cannot read.
+
+No contract change — no symbol, macro, section, or build-target semantics changed; the recommended commands change, the exported data does not. Resolves [JC-000/c64-lib-contract#52](https://github.com/JC-000/c64-lib-contract/issues/52), found during c64-nist-curves' v0.5.0–v0.7.1 adoption ([c64-nist-curves#86](https://github.com/JC-000/c64-nist-curves/issues/86)).
 
 ### 0.7.1 — 2026-08-12
 
