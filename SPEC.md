@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.7.2 (2026-08-13)
+**Version:** 0.7.3 (2026-08-13)
 **Status:** Draft — under joint review by adopters and consumers.
 
 ## 0. Scope and audience
@@ -221,6 +221,30 @@ Each §8.x sub-clause declares one bit constant of the form `LIB_SHARED_PRIMITIV
 | `$0001` | `LIB_SHARED_PRIMITIVES_SQTAB` | 8×8 quarter-square multiply table | §8.1 |
 | `$0002` | `LIB_SHARED_PRIMITIVES_REU_MUL` | 8×8→16 REU multiplication table (128 KB bank pair) | §8.2 |
 | `$0004` | `LIB_SHARED_PRIMITIVES_CT_MUL_8X8` | constant-time 8×8→16 multiply body | §8.3 |
+
+**Definition site (normative).** The bit constants above are plain assemble-time equates and **MUST NOT** be `.export`ed. Each adopter copies the block verbatim into its own source — exactly as §13.0's `NET_FAMILY_*` constants are copied — and `.ifndef`-guards them so a consumer may define them globally without a redefinition error:
+
+```asm
+.ifndef LIB_SHARED_PRIMITIVES_SQTAB
+  LIB_SHARED_PRIMITIVES_SQTAB      = $0001
+.endif
+.ifndef LIB_SHARED_PRIMITIVES_REU_MUL
+  LIB_SHARED_PRIMITIVES_REU_MUL    = $0002
+.endif
+.ifndef LIB_SHARED_PRIMITIVES_CT_MUL_8X8
+  LIB_SHARED_PRIMITIVES_CT_MUL_8X8 = $0004
+.endif
+```
+
+Both sides of the link carry the values, and only exported symbols can collide. The per-library `LIB_<X>_SHARED_PRIMITIVES` and `LIB_<X>_SHARED_CONSUMES` masks are this clause's **sole** exports; they carry the library prefix and therefore cannot collide.
+
+An adopter that exports the bit constants reintroduces the [#43](https://github.com/JC-000/c64-lib-contract/issues/43) collision on a family the v0.7.0 prefixed forms do not cover — two libraries exporting `LIB_SHARED_PRIMITIVES_SQTAB` at the same value still fail the link:
+
+```
+ld65: Error: Duplicate external identifier: 'LIB_SHARED_PRIMITIVES_SQTAB'
+```
+
+ld65 rejects duplicate externals regardless of whether the values agree, and it halts at the first one, so a consumer sees a single name rather than the full set. This is stated against its opposite because the failure is invisible to the adopter — a library exporting these builds and tests cleanly standalone, and only a *composed consumer* ever sees the error.
 
 **Consumer-side composition.** Each adopter's `LIB_<X>_SHARED_PRIMITIVES` mask reflects the primitives it **owns in this build configuration**: a primitive's bit is included **iff this build does NOT defer that primitive** via its per-primitive migration switch (the `SHARED_*` / `SHARED_*_INIT` define from the primitive's §8.x clause). A library that defers a shared primitive to a canonical provider (built with that switch defined) drops the corresponding bit, so two libraries linked into the same PRG that share a primitive end up with **disjoint** masks — exactly one keeps the bit. A consumer then asserts disjointness:
 
@@ -674,6 +698,12 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.7.3 — 2026-08-13
+
+Doc-only (§8.0): stated normatively that the §8.x per-primitive bit constants **MUST NOT** be `.export`ed. §8.0 already showed them as plain equates and never exported them anywhere, but never said so — and both current §8 adopters filled that silence the other way, exporting `LIB_SHARED_PRIMITIVES_SQTAB` / `_CT_MUL_8X8` (and, in `c64-x25519`, `_REU_MUL`). Because those names are unprefixed and identically valued in both libraries, a consumer importing two manifests still fails to link **after a complete and correct v0.7.0 migration** — the prefixed forms added for [#43](https://github.com/JC-000/c64-lib-contract/issues/43) cover §1 and §8.4, and this is neither. Measured on ca65/ld65 V2.18 against the shipped `c64-x25519` v0.8.0 + `c64-ChaCha20-Poly1305` v0.6.0 archives: a consumer importing only the two §5 ownership masks — the exact composition §8.0's disjointness assert calls for — dies with `Duplicate external identifier`, and ld65 halts at the first one so the visible error understates the set.
+
+Adds the `.ifndef`-guarded copy-verbatim block and names the two per-library masks as the clause's sole exports, mirroring the §13.0 `NET_FAMILY_*` treatment from v0.6.1 — whose changelog entry already cited "exactly as the §8.x bit constants are copied" as its precedent, which was true of how §8.0 described them and false of what adopters shipped. That gap is now closed in the direction the v0.6.1 entry assumed. No contract change — no symbol, value, macro, or build-target semantics change; adopters that never exported the constants (`c64-nist-curves`) are already conformant. Resolves [JC-000/c64-lib-contract#56](https://github.com/JC-000/c64-lib-contract/issues/56); adopter-side fixes tracked as [c64-x25519#78](https://github.com/JC-000/c64-x25519/issues/78) and [c64-ChaCha20-Poly1305#57](https://github.com/JC-000/c64-ChaCha20-Poly1305/issues/57).
 
 ### 0.7.2 — 2026-08-13
 
