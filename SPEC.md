@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.7.3 (2026-08-13)
+**Version:** 0.7.4 (2026-08-13)
 **Status:** Draft — under joint review by adopters and consumers.
 
 ## 0. Scope and audience
@@ -409,8 +409,17 @@ PRECALC_SHARED_YES     = $01
 ;
 ; SIZE is exported without an address-size hint so values > 16 bits
 ; (e.g. the 131072-byte REU mul table) export cleanly as 'far'
-; without a "far but exported absolute" warning. REGION and SHARED
-; are byte-valued and exported without a hint for consistency.
+; without a "far but exported absolute" warning — its address size is
+; value-dependent by design (absolute at 1024, far at 131072).
+;
+; REGION and SHARED are pinned ': abs' instead. They can never exceed a
+; byte, so ca65 would infer 'zeropage' for them in every adopter, while
+; a consumer's .import defaults to absolute — which makes the §8.4
+; cross-check snippet emit an "Address size mismatch" warning on every
+; composed build. The link succeeds and the asserts evaluate correctly,
+; but the natural consumer reaction is to write '.import ... : zeropage',
+; pinning a manifest constant to an address size that is an artifact of
+; its current value rather than a property of the symbol.
 
 .macro LIB_PRECALC_TABLE name, size_bytes, region, shared, lib
     .ifndef LIB_NO_BARE_EXPORTS
@@ -419,8 +428,8 @@ PRECALC_SHARED_YES     = $01
         .ident (.sprintf("LIB_PRECALC_%s_SHARED", name)) = shared
 
         .export .ident (.sprintf("LIB_PRECALC_%s_SIZE",   name))
-        .export .ident (.sprintf("LIB_PRECALC_%s_REGION", name))
-        .export .ident (.sprintf("LIB_PRECALC_%s_SHARED", name))
+        .export .ident (.sprintf("LIB_PRECALC_%s_REGION", name)): abs
+        .export .ident (.sprintf("LIB_PRECALC_%s_SHARED", name)): abs
     .endif
 
     .if .not .blank (lib)
@@ -429,8 +438,8 @@ PRECALC_SHARED_YES     = $01
         .ident (.sprintf("LIB_%s_PRECALC_%s_SHARED", lib, name)) = shared
 
         .export .ident (.sprintf("LIB_%s_PRECALC_%s_SIZE",   lib, name))
-        .export .ident (.sprintf("LIB_%s_PRECALC_%s_REGION", lib, name))
-        .export .ident (.sprintf("LIB_%s_PRECALC_%s_SHARED", lib, name))
+        .export .ident (.sprintf("LIB_%s_PRECALC_%s_REGION", lib, name)): abs
+        .export .ident (.sprintf("LIB_%s_PRECALC_%s_SHARED", lib, name)): abs
     .else
         .ifdef LIB_NO_BARE_EXPORTS
             .error "LIB_PRECALC_TABLE: LIB_NO_BARE_EXPORTS suppresses the bare exports, so the lib-prefix argument is required — this invocation would emit nothing"
@@ -698,6 +707,16 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.7.4 — 2026-08-13
+
+Doc/macro fix (§8.4): the canonical `LIB_PRECALC_TABLE` macro now exports `_REGION` and `_SHARED` with an explicit `: abs` hint. Both are byte-valued by construction (`$01`-`$03` and `$00`/`$01`), so ca65 inferred **zeropage** for them in every adopter, while a consumer's `.import` defaults to absolute — making §8.4's own published cross-check snippet emit `ld65: Warning: Address size mismatch` on every composed build. Measured on ca65/ld65 V2.18 before and after: the pre-fix macro exports `_REGION`/`_SHARED` as `zeropage` and the copied snippet warns; after, both are `absolute` and the snippet links clean.
+
+`_SIZE` is deliberately left unhinted — its address size is value-dependent by design, absolute at 1024 and `far` at 131072, which is what lets the oversized `reu_mul` table export without the "far but exported absolute" warning fixed in 0.4.1. Regression-checked in the same run: a 131072-byte table still exports `_SIZE` as `far` after the change.
+
+The link always succeeded and both asserts always evaluated correctly, so this was diagnostic noise rather than breakage — but it appeared once per imported `_REGION`/`_SHARED` in every composed consumer build, and the natural way to silence it is `.import ... : zeropage`, which pins a manifest constant to an address size that is an artifact of its current value rather than a property of the symbol. Third instance of the copy-paste-facing-snippet defect class after [#41](https://github.com/JC-000/c64-lib-contract/issues/41) (`.and` vs `&`) and [#50](https://github.com/JC-000/c64-lib-contract/issues/50) (`--asm-define` vs `-D`), and the weakest of the three — it warns rather than fails.
+
+PATCH per §7 — no symbol name, value, or semantic change; the emitted equates are identical apart from declared address size, and every existing `.import` resolves to the same value. **Adopter action:** `precalc_table.inc` is copied verbatim per §8.4, so adopters re-copy it. Only `c64-ChaCha20-Poly1305` currently ships the v0.7.0 five-argument form; `c64-x25519` has not migrated yet ([c64-x25519#78](https://github.com/JC-000/c64-x25519/issues/78) item 4), so landing this before that migration saves a second round-trip there. Resolves [JC-000/c64-lib-contract#58](https://github.com/JC-000/c64-lib-contract/issues/58), found running the merged c64-ChaCha20-Poly1305 PR #60 through the c64-wireguard two-library integration.
 
 ### 0.7.3 — 2026-08-13
 
