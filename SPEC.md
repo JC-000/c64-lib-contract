@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.8.2 (2026-08-14)
+**Version:** 0.8.3 (2026-08-14)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -192,14 +192,18 @@ SEGMENTS {
 
 Each declaration states the attribute, its required value, and what breaks if it is wrong. State the consequence, not just the requirement — a consumer who knows only *that* `align` matters will still drop it when reorganising a memory map under pressure.
 
-**"The link was clean" is not evidence.** Measured on ld65 V2.18:
+**"The link was clean" is not evidence.** Measured on ld65 V2.18 — and both diagnostics are **conditional on the library's own shape**, not on the violation:
 
-| Violation | ld65 says | Result |
-|---|---|---|
-| `align = $100` omitted | `Segment 'X' isn't aligned properly; the resulting executable might not be functional` — a **warning**; links | a `.align 256` LUT lands one byte off a page boundary |
-| `type = rw` → `type = bss` | **nothing** | the initialised byte vanishes from the image; reads return power-on garbage |
+| Violation | ld65 warns | …only when | Silent when | Result |
+|---|---|---|---|---|
+| `align = $100` omitted | sometimes | the segment contains a source-level `.align`, which gives ld65 an explicit request to check the cfg against | alignment is expressed **only in the cfg** — no `.align` in any source file | the table lands off its page boundary either way |
+| `type = rw` → `type = bss` | sometimes | the segment's content is **non-zero** | content is zero-filled — `.res n, 0`, the ordinary library-scratch shape | see below |
 
-Neither is an error. The second produces no diagnostic whatsoever, so a consumer has no signal at all short of a functional test — which is why the declaration is the library's obligation rather than something a careful consumer could infer.
+Neither is ever an error, and neither condition is one a consumer can evaluate: both depend on library source the consumer does not read. A library expressing page alignment in its cfg alone — a normal and correct thing to do — gets **no diagnostic at all** when a consumer drops the attribute, and the same holds for any zero-filled buffer flipped to `bss`. The loud cases are the exception, not the rule.
+
+**The `bss` consequence is worse than a stale byte.** If the affected segment is last in a file-emitting area, its bytes are simply absent and read as power-on garbage. **Mid-area, ld65 emits a shorter image and everything after the hole loads at the wrong address** — measured at 9,154 bytes of displacement for one mid-image code segment, every subsequent byte landing that far below its link address. Such a build can appear to work by coincidence: it does, if the missing content happens to be zeros and every affected buffer happens to be written before it is read.
+
+That is why declaring is the library's obligation rather than something a careful consumer could infer — the consumer cannot see the conditions that decide whether they get a warning at all.
 
 This is the §2 / §3 pattern applied to placement: those clauses already make ZP slots and REU banks declared, overridable, and checkable rather than leaving a consumer to discover them. §8.1 likewise `.assert`s that `LIB_SHARED_SQTAB_BASE` is page-aligned — but nothing today protects the *segment* that alignment is measured from, which is the gap this closes.
 
@@ -752,6 +756,18 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.8.3 — 2026-08-14
+
+Doc-only (§4): corrected the v0.8.0 clause's own risk assessment, which was wrong in a way that would mislead exactly the adopter following it. Reported from `c64-nist-curves` after adopting v0.8.0, re-measured here on ld65 V2.18.
+
+**Both diagnostics are conditional on the library's shape, not on the violation.** The clause presented the dropped-`align` case as loud and the `bss` case as uniquely silent. In fact the alignment warning fires only when the segment contains a source-level `.align` directive — it is that directive ld65 checks the cfg against, not the absence of the attribute. A library expressing page alignment **only in its cfg**, which `c64-nist-curves` does with no `.align` anywhere in its sources, gets no diagnostic whatsoever and the table lands off-page identically. Symmetrically, the `bss` warning keys on the segment's **byte values**: `.byte 1` warns, `.byte 0` does not, and a `.res n, 0` buffer — the ordinary library-scratch shape — disappears silently. Verified both directions here: 256 zero bytes vanished from an image with no diagnostic at all.
+
+So the two shapes most likely to occur in practice are the two that produce no signal, and neither condition is one a **consumer** can evaluate, because both depend on library source the consumer never reads. That strengthens the clause's conclusion — declaring is the library's obligation — while invalidating the evidence table it rested on.
+
+**The `bss` consequence was also understated.** "Reads return power-on garbage" holds only when the segment is last in a file-emitting area. Mid-area, ld65 emits a shorter image and everything past the hole loads at the wrong address — measured at 9,154 bytes of displacement for a single mid-image code segment. Such a build can appear to work by coincidence, if the absent content is zeros and every affected buffer is written before it is read.
+
+PATCH per §7 — corrects measured claims and severity in prose; no normative requirement changes. Resolves items 1, 3 and 4 of [JC-000/c64-lib-contract#78](https://github.com/JC-000/c64-lib-contract/issues/78). Item 2 (no way to declare a non-segment address reservation) is routed to the [#76](https://github.com/JC-000/c64-lib-contract/issues/76) §6 restructuring; item 5 (`ZEROPAGE` ownership between §2 and §4) remains open as editorial.
 
 ### 0.8.2 — 2026-08-14
 
