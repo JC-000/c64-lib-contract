@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.7.5 (2026-08-13)
+**Version:** 0.8.0 (2026-08-14)
 **Status:** Draft — under joint review by adopters and consumers.
 
 ## 0. Scope and audience
@@ -170,6 +170,38 @@ my_helper:
 ```
 
 **Multi-variant libraries** (e.g., per-curve) MUST split per-variant segments: `LIB_NISTCURVES_P256_CODE`, `LIB_NISTCURVES_P384_CODE`. This lets a consumer link only the variants it uses.
+
+**Load-bearing cfg attributes (normative).** Segment *names* are only half of what a consumer must get right. A library whose correctness or constant-time behaviour depends on how its segments are placed MUST declare those dependencies, and a consumer placing library segments MUST preserve them.
+
+Declare them as comments on the segment lines of the example cfg this clause already requires, so they travel with the thing consumers copy:
+
+```
+SEGMENTS {
+    # REQUIRED align = $100 — CT invariant. Secret-indexed `.align 256` LUTs
+    # are aligned relative to this segment; without page alignment here an
+    # indexed read crosses a page for some indices and takes an extra cycle,
+    # making execution time depend on a secret. ld65 only *warns*.
+    LIB_FOO_CODE: load = MAIN, type = ro, align = $100;
+
+    # REQUIRED type = rw in a file-emitting area — holds initialised data
+    # (`foo_ready` idempotence flag). Under `type = bss` the bytes are not
+    # emitted and read as power-on garbage. ld65 says nothing at all.
+    LIB_FOO_DATA: load = MAIN, type = rw;
+}
+```
+
+Each declaration states the attribute, its required value, and what breaks if it is wrong. State the consequence, not just the requirement — a consumer who knows only *that* `align` matters will still drop it when reorganising a memory map under pressure.
+
+**"The link was clean" is not evidence.** Measured on ld65 V2.18:
+
+| Violation | ld65 says | Result |
+|---|---|---|
+| `align = $100` omitted | `Segment 'X' isn't aligned properly; the resulting executable might not be functional` — a **warning**; links | a `.align 256` LUT lands one byte off a page boundary |
+| `type = rw` → `type = bss` | **nothing** | the initialised byte vanishes from the image; reads return power-on garbage |
+
+Neither is an error. The second produces no diagnostic whatsoever, so a consumer has no signal at all short of a functional test — which is why the declaration is the library's obligation rather than something a careful consumer could infer.
+
+This is the §2 / §3 pattern applied to placement: those clauses already make ZP slots and REU banks declared, overridable, and checkable rather than leaving a consumer to discover them. §8.1 likewise `.assert`s that `LIB_SHARED_SQTAB_BASE` is page-aligned — but nothing today protects the *segment* that alignment is measured from, which is the gap this closes.
 
 **Library's own standalone build:** the library's example cfg (`cfg/<libname>.cfg` or similar) MUST add a `SEGMENTS{}` block that maps the prefixed names back to MAIN/RODATA/DATA for the standalone PRG. That way, the library's own tests and bench harness build unchanged.
 
@@ -720,6 +752,16 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.8.0 — 2026-08-14
+
+Additive (§4): libraries whose correctness or constant-time behaviour depends on **how** their segments are placed MUST now declare those cfg attributes, and consumers placing library segments MUST preserve them. §4 previously governed segment *names* only — and its stated value is that a consumer writes the `SEGMENTS{}` block themselves ("zero source patches"), so the contract handed the consumer authorship of placement while saying nothing about which attributes the library depends on.
+
+Two measured failure modes motivate it, both from `c64-ChaCha20-Poly1305` (ld65 V2.18). Dropping `align = $100` puts a secret-indexed `.align 256` LUT one byte off a page boundary — the directive aligns relative to its segment, so absolute alignment needs the cfg — and an indexed read then crosses a page for some indices, costing an extra cycle and making execution time depend on a secret. **ld65 only warns and links anyway.** Changing `type = rw` to `type = bss` drops an initialised flag byte from the image so it reads power-on garbage, skipping a `sqtab_init` that the flag exists to gate. **ld65 emits no diagnostic at all.** Neither is an error, so a clean link is not evidence of correct placement — stated explicitly in the clause, since the silent case gives a consumer no signal short of a functional test.
+
+Declarations live as comments on the segment lines of the example cfg §4 already requires, so they travel with the artefact consumers copy, and each states the attribute, its required value, and the consequence of getting it wrong. This is the §2 / §3 pattern applied to placement: ZP slots and REU banks are already declared, overridable and checkable rather than left for a consumer to infer. §8.1 additionally `.assert`s that `LIB_SHARED_SQTAB_BASE` is page-aligned, while nothing protected the segment that alignment is measured from — the asymmetry this closes.
+
+MINOR per §7 — additive obligation, no symbol, macro or build-target semantics changed. Adopters with alignment-sensitive tables or initialised library data annotate their example cfg; `c64-ChaCha20-Poly1305` has both cases, `c64-nist-curves` and `c64-x25519` have page-alignment-sensitive shared tables. Resolves [JC-000/c64-lib-contract#63](https://github.com/JC-000/c64-lib-contract/issues/63).
 
 ### 0.7.5 — 2026-08-13
 
