@@ -1,7 +1,9 @@
 # C64 Library ABI Contract
 
-**Version:** 0.8.1 (2026-08-14)
+**Version:** 0.8.2 (2026-08-14)
 **Status:** Draft — under joint review by adopters and consumers.
+
+**Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
 
 ## 0. Scope and audience
 
@@ -751,6 +753,14 @@ See [consumers.md](consumers.md) for the list of consumer projects relying on th
 
 ## 12. Changelog
 
+### 0.8.2 — 2026-08-14
+
+Doc-only: every version in §12 is now tagged `v<version>` in this repository, and the header says so. Previously the newest tag was **v0.4.0** against a `main` at v0.8.1 — twelve untagged versions — so a consumer pinning or reading by tag, which is the natural thing to do with a document defining a contract, got normative text four minor versions stale. A `c64-https` alignment audit was scoped against v0.4.0 on exactly that basis and missed §13, the v0.5.0 `SHARED_CONSUMES` mask and the whole [#43](https://github.com/JC-000/c64-lib-contract/issues/43) prefixed-export migration. Thirteen tags were created retroactively at each version's tip commit, and every tag from `v0.3.2` onward now has a `SPEC.md` header matching its own name — verified tag by tag.
+
+Two older tags do not, and are documented rather than moved: `v0.3.0` and `v0.3.1` both point at commits whose header reads 0.2.0, and no commit in this repository ever carried a 0.3.0 or 0.3.1 header — those releases were tagged before the header line was being stamped. A caveat note now sits above the 0.3.1 entry. They were left in place because relocating a published tag silently changes what anything pinned to it resolves to, which is a worse failure than a documented inconsistency.
+
+The header note also tells readers to check a tag's stated version rather than infer it from tag recency — the same mistake that produced a false "tagged" claim in `adopters.md` during the v0.7.0 migration, corrected in PR #61. Resolves [JC-000/c64-lib-contract#71](https://github.com/JC-000/c64-lib-contract/issues/71).
+
 ### 0.8.1 — 2026-08-14
 
 Doc-only (§1): fixed both consumer-side version-guard snippets, neither of which assembled, and added the missing `: abs` export hint to the §1 pattern.
@@ -852,6 +862,9 @@ MINOR bump: additive §8.3 plus a corrected §8.0 mask form that is backward-com
 Doc-only: reworked the §8.0 "Consumer-side composition" example to cross-check a composed library's precalc tables via `od65 --dump-exports build/*.o | grep LIB_PRECALC_<name>` — the canonical §8.0 audit tool, which works for any table size — instead of the previous `.import LIB_PRECALC_<name>_SIZE` + `.assert` form. Added a normative address-size note: on the ca65 6502 target the assemble-time `.import` + `.assert` cross-check of `LIB_PRECALC_<name>_SIZE` is valid only for tables ≤ 65 535 B, because `.import` has no `: far` (24-bit) hint — only `: zp` / `: abs` — so importing the `_SIZE` of a larger table (e.g. `reu_mul` = 131072 B) raises `Range error (131072 not in [-32768..65535])`. The producer-side `.export LIB_PRECALC_<name>_SIZE` equate is unaffected and the `LIB_PRECALC_TABLE` macro emits the same equates as before; this is an example/clarification fix only. The retained assemble-time snippet now uses the ≤ 64 KB `sqtab` table. No contract change — no symbol, macro, or build-target semantics changed. Resolves [JC-000/c64-lib-contract#18](https://github.com/JC-000/c64-lib-contract/issues/18), found during the c64-x25519 §8.0 step-6 adoption.
 
 ### 0.3.1 — 2026-05-23
+
+> **Tag caveat.** The `v0.3.0` and `v0.3.1` tags predate the practice of stamping the version on `SPEC.md`'s header line. Both point at commits whose header reads **0.2.0**, and no commit in this repository's history carries a `0.3.0` or `0.3.1` header. The changelog entries below are the authoritative record of what those releases contained; the tags are correct as *content* pointers and wrong as *version* labels. Left in place rather than moved, because relocating a published tag changes what anything pinned to it resolves to. All tags from `v0.3.2` onward are self-consistent.
+
 
 Additive: §8.0 extended with a "Catch loop: enumeration at adopter intake" subsection that makes precalculated-table enumeration mandatory at adopter intake. Introduces (a) a size + access-pattern floor (≥ 256 B AND one of: REU-resident / hot-loop-read / page-aligned) so the catalog stays signal-rich, (b) a two-form enumeration requirement — `docs/precalc-tables.md` for human-readable shape + classification rationale, and a `LIB_PRECALC_TABLE` ca65 macro for build-time discoverability via three exported `LIB_PRECALC_<name>_{SIZE,REGION,SHARED}` equates per table (case-preserved from the macro argument), (c) the canonical [`precalc_table.inc`](precalc_table.inc) source at the repo root as the verbatim copy-target for adopters, smoke-tested under [`examples/precalc_table_smoke.s`](examples/precalc_table_smoke.s) via `make verify` covering all six (region × shared) combinations and the 65 536-byte `far`-export regression guard, (d) audit triggers covering new adopter, new-minor adding a table, **and generalisation of a previously curve-/algorithm-specific table** (with the c448 / Ed448 re-classification example), (e) per-§8.x back-link sub-paragraphs pinning canonical macro arguments (`"sqtab"` / `"reu_mul"`) as normative and forbidding library-prefixed substitutions so cross-adopter `od65 --dump-exports` grep stays signal-rich. Asymmetry between the doc and macro forms blocks adopter PRs per the new intake-reviewer-MUST rule in `adopters.md` step 6. No breaking changes — pre-existing adopters acquire a §8.0 obligation at their next adoption-status update PR. Motivated by [JC-000/c64-lib-contract#11](https://github.com/JC-000/c64-lib-contract/issues/11) and the observation that both §8.1 (`sqtab`) and §8.2 (`reu_mul`) were caught reactively rather than at intake.
 
