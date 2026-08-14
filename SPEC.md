@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.8.3 (2026-08-14)
+**Version:** 0.8.4 (2026-08-14)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -155,7 +155,7 @@ Consumers MAY relocate any library's REU base via `-D` to resolve a collision. T
 
 ## 4. Segment naming
 
-Library code, rodata, and BSS MUST live in segments prefixed with `LIB_<X>_` (uppercase). The default ld65 segment names (`CODE`, `RODATA`, `DATA`, `BSS`) MUST NOT appear in library sources.
+Library code, rodata, and BSS MUST live in segments prefixed with `LIB_<X>_` (uppercase). The default ld65 segment names (`CODE`, `RODATA`, `DATA`, `BSS`) MUST NOT appear in library sources. **`ZEROPAGE` is exempt**: zero-page allocation is governed by §2, which requires `.exportzp`-ed, `.ifndef`-guarded slot equates rather than a prefixed segment name. A misplaced ZP segment fails loudly with a range error, so it needs no silent-failure protection here.
 
 **Why:** Consumer projects use their own `CODE` / `RODATA` for `main.s` and helpers. Without prefixed segments, the consumer must mid-build `sed -i ''` the library's `.segment "CODE"` directives to rename them before assembly. Prefixed segments let the consumer's cfg `SEGMENTS{}` block place library bytes by name — zero source patches.
 
@@ -756,6 +756,12 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.8.4 — 2026-08-14
+
+Doc-only (§4): stated that `ZEROPAGE` is exempt from the prefixed-segment rule and that §2 owns zero-page allocation. §4 forbids the default ld65 segment names in library sources and enumerates `CODE` / `RODATA` / `DATA` / `BSS`; `ZEROPAGE` is also a default name but absent from that list, leaving two readings — deliberately exempt because §2 governs ZP, or an oversight. Every adopter uses `.segment "ZEROPAGE"` in `zp_config.s`, so the question is live rather than theoretical. No consequence either way, since a misplaced ZP segment fails loudly with a range error rather than silently, which the clause now says. Resolves item 5 of [#78](https://github.com/JC-000/c64-lib-contract/issues/78).
+
+Recording a measurement that answers the reporter's own calibration question on item 1, since it decides whether the v0.8.3 rewrite was the right shape of fix. They asked whether cfg-only alignment is the unusual case, in which case a caveat would have sufficed instead of a rewritten table. Counting source-level `.align` directives across all four adopters at their current tags: `c64-x25519` 6, `c64-ChaCha20-Poly1305` 3, `c64-nist-curves` 0, `c64-polyval` 0. **The fleet is split exactly two and two** — neither shape is unusual, so a clause stating unconditional behaviour is wrong for half the adopters however it is worded, and the conditional table is the correct fix rather than an over-correction.
 
 ### 0.8.3 — 2026-08-14
 
