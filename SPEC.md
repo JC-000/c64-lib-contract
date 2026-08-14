@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.8.4 (2026-08-14)
+**Version:** 0.8.5 (2026-08-14)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -590,6 +590,8 @@ The `.ifndef` guard lets the library assemble standalone with its existing defau
 
 The contract pins *shape*, not *placement*. A consumer linking multiple sqtab-using libraries supplies one `-D LIB_SHARED_SQTAB_BASE=$<addr>` and the libraries agree.
 
+**Export discipline (v0.8.5).** `LIB_SHARED_SQTAB_BASE` is consumer *input*. Libraries MUST NOT `.export` it: two libraries exporting the same unprefixed name is a guaranteed `ld65: Duplicate external identifier` in any composed link (the [#82](https://github.com/JC-000/c64-lib-contract/issues/82)-class failure, which hit §8.2's analogous equates). Fleet practice was already unanimous — no adopter exports it; this sentence makes the practice normative.
+
 **Init.** The canonical init entry point is `mul_tables_init`. It populates both tables from the quarter-square recurrence and MUST be idempotent — calling it twice produces the same table state and has no side effects beyond the table bytes.
 
 **Migration shape.** Each adopting library MAY keep its existing per-lib `sqtab_init` exported for backwards compatibility. Under `.ifdef SHARED_SQTAB_INIT`, the library's own init body is gated out and the canonical `mul_tables_init` takes over. This lets a consumer flip libraries to the shared init one at a time without an atomic cross-repo cutover.
@@ -671,6 +673,35 @@ The `.ifndef` guards let each library assemble standalone with its existing defa
 ```
 
 Page alignment and adjacent placement of the two stage buffers are required by the fetch primitive's 4×-unrolled `abs,y` accumulator loop. Each adopter's existing `mul_dma_lo` / `mul_dma_hi` labels remain exported for backwards compatibility; the canonical names alias them.
+
+**Export discipline (v0.8.5).** Every `LIB_SHARED_REU_MUL_*` equate above is consumer *input* (or derived directly from one). Libraries MUST NOT `.export` any of them. Both REU adopters did, producing a live `Duplicate external identifier: 'LIB_SHARED_REU_MUL_BANKS_USED'` in the exact pair `c64-https` ships — see [#82](https://github.com/JC-000/c64-lib-contract/issues/82); fixed adopter-side in [c64-x25519#92](https://github.com/JC-000/c64-x25519/pull/92) and [c64-nist-curves#103](https://github.com/JC-000/c64-nist-curves/pull/103).
+
+What a §8.2-consuming library MUST export instead is its library-prefixed *output* counterparts of the three placement equates, so a consumer can verify that co-linked libraries agree on placement:
+
+```asm
+; library side — in the TU that consumes the §8.2 knobs
+LIB_<X>_SHARED_REU_MUL_BANK       = LIB_SHARED_REU_MUL_BANK
+LIB_<X>_SHARED_REU_MUL_OFFSET     = LIB_SHARED_REU_MUL_OFFSET
+LIB_<X>_SHARED_REU_MUL_BANKS_USED = LIB_SHARED_REU_MUL_BANKS_USED
+.export LIB_<X>_SHARED_REU_MUL_BANK:       abs
+.export LIB_<X>_SHARED_REU_MUL_OFFSET:     abs
+.export LIB_<X>_SHARED_REU_MUL_BANKS_USED: abs
+```
+
+Libraries that honor the ZP/staging knobs SHOULD additionally export prefixed counterparts of those (`LIB_<X>_SHARED_REU_MUL_ZP_INIT_A`, …, `LIB_<X>_SHARED_REU_MUL_STAGE_HI`), same shape.
+
+**The exported value MUST be the value the code reads.** An export whose value the library's REU access paths do not actually consume certifies nothing — `c64-x25519`'s pre-#92 export was exactly this: code read `X25519_REU_BANK` at every access site while the §8.2 knob published a number nothing consumed, so `-D LIB_SHARED_REU_MUL_BANK=$04` succeeded silently, published 4, and read bank 0. Adopter review MUST grep the access paths for the knob, not just the export list.
+
+Consumer cross-check:
+
+```asm
+; consumer side — placement agreement across co-linked §8.2 consumers
+.import LIB_NISTCURVES_SHARED_REU_MUL_BANK
+.import LIB_X25519_SHARED_REU_MUL_BANK
+.assert LIB_NISTCURVES_SHARED_REU_MUL_BANK = LIB_X25519_SHARED_REU_MUL_BANK, lderror, "co-linked libraries disagree on reu_mul placement"
+```
+
+(`lderror`, not `error`: the operands are imports, unknown at assemble time — §1's guard rule applies. Both snippets assemble-tested, and the assert verified to fire on a deliberate one-bank disagreement, ca65/ld65 V2.18.)
 
 **Init.** The canonical init entry point is `reu_mul_tables_init`. It populates banks `LIB_SHARED_REU_MUL_BANK` and `LIB_SHARED_REU_MUL_BANK + 1` and nothing else. The contract is **safe to call twice**: a second call produces the same final REU state with the same observable side effects (the full ~3 s of init work runs twice). The contract does NOT promise no-op on re-call — adding an init-done flag would be an additive change deferred to a future minor bump if a consumer needs it. "Safe to call twice" is the load-bearing reading; do not infer "idempotent" in the no-op sense from this clause.
 
@@ -756,6 +787,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.8.5 — 2026-08-14
+
+Normative (PATCH, following the 0.7.3/0.7.4 precedent for export-surface rulings): §8.1 and §8.2 gain **export discipline** paragraphs. §8.1: `LIB_SHARED_SQTAB_BASE` MUST NOT be exported — ratifies unanimous fleet practice. §8.2: the `LIB_SHARED_REU_MUL_*` consumer-input equates MUST NOT be exported — both REU adopters exported them, yielding a live `Duplicate external identifier: 'LIB_SHARED_REU_MUL_BANKS_USED'` in the pair `c64-https` ships ([#82](https://github.com/JC-000/c64-lib-contract/issues/82); fixed adopter-side in c64-x25519#92 and c64-nist-curves#103) — and each §8.2-consuming library MUST export library-prefixed `LIB_<X>_SHARED_REU_MUL_{BANK,OFFSET,BANKS_USED}` output counterparts **whose values are the values the code reads** (the pre-#92 x25519 export was decorative: code read `X25519_REU_BANK` while the knob published an unread number, so a consumer `-D` override succeeded silently and relocated nothing). Adds the consumer placement-agreement `.assert` (`lderror` — imported operands per §1's guard rule). Both snippets assemble-tested; the assert verified to fire on a deliberate disagreement (ca65/ld65 V2.18). Routed standalone rather than into [#76](https://github.com/JC-000/c64-lib-contract/issues/76)'s §6 restructuring so the ruling is citable at a tag now; the §6 chapter absorbs it editorially. `c64-x25519` main already conforms fully; `c64-nist-curves` main conforms on the MUST-NOT half, prefixed outputs to follow.
 
 ### 0.8.4 — 2026-08-14
 
