@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.8.5 (2026-08-14)
+**Version:** 0.8.6 (2026-08-14)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -111,12 +111,14 @@ Every library that claims any ZP slots MUST publish them as `.exportzp`-ed equat
 **Consumer override:**
 
 ```sh
-ca65 -D fp_src1=$40 -D fp_src2=$44 ...
+ca65 -D 'fp_src1=$40' -D 'fp_src2=$44' ...
 ```
 
 The library's own standalone tests assemble with the defaults; the consumer relocates as needed via `-D`.
 
 > **Flag spelling (normative for every snippet in this document).** The ca65 symbol-define flag is **`-D name[=value]`**. It is *not* `--asm-define` — that is `cl65`'s spelling for the same thing, which `cl65` forwards to ca65. Invoking `ca65 --asm-define ...` fails outright with `ca65: Unknown option: --asm-define` (measured, ca65 V2.18). Consumers driving the build through `cl65` may use either form; every `ca65` command line in §2, §3, §8.x and §13 uses `-D`.
+>
+> **`$`-hex quoting (normative for every `-D` value, v0.8.6).** A `-D` value containing ca65's `$` hex prefix MUST be single-quoted on any shell command line: unquoted, the shell expands `$40` as positional parameter `$4` followed by `0`, so `-D fp_src1=$40` silently becomes `-D fp_src1=0` — the assemble succeeds, the guard `.ifndef` is satisfied, and the slot lands at address `$00` with no diagnostic at any stage (measured, sh and zsh). Inside a **make** variable or recipe the failure is worse: make's own `$`-expansion consumes the sigil first, and the `$$` escape then hits the same shell expansion — so make-mediated interfaces MUST pass `$`-free values (decimal: `-D fp_src1=64`) rather than escaped hex (both `$40` and `$$40` measured to produce 0 through make). Adopter docs that copied the previously-unquoted forms should re-check their own snippets.
 
 ## 3. REU layout contract
 
@@ -140,7 +142,7 @@ If a library uses any 17xx-series RAM Expansion Unit (REU) banks for precompute 
 **Consumer override:**
 
 ```sh
-ca65 -D X25519_REU_BANK=$03 ...
+ca65 -D 'X25519_REU_BANK=$03' ...
 ```
 
 **Aggregate bitmask:** the library MUST also export a `LIB_<X>_REU_BANKS_USED` bitmask equate listing every REU bank the library claims. Consumers compose these per-library masks at assemble time:
@@ -583,12 +585,12 @@ sqtab_hi = LIB_SHARED_SQTAB_BASE + $0200
 .assert sqtab_hi = sqtab_lo + $0200,        error, "sqtab_hi must follow sqtab_lo by $0200"
 ```
 
-The `.ifndef` guard lets the library assemble standalone with its existing default; the consumer overrides via `ca65 -D LIB_SHARED_SQTAB_BASE=$<addr>`. The two `.assert`s catch misconfigurations at assemble time:
+The `.ifndef` guard lets the library assemble standalone with its existing default; the consumer overrides via `ca65 -D 'LIB_SHARED_SQTAB_BASE=$<addr>'` (single-quoted — §2's `$`-hex quoting note). The two `.assert`s catch misconfigurations at assemble time:
 
 - `LIB_SHARED_SQTAB_BASE & $00ff == 0` — CT-strict `abs,x` indexing requires a page-aligned base for cycle-stable loads.
 - `sqtab_hi - sqtab_lo == $0200` — adopters that dispatch via self-modifying code on the lo→hi delta fold this constant into the opcode hi-byte patching; alternative deltas silently miscompute.
 
-The contract pins *shape*, not *placement*. A consumer linking multiple sqtab-using libraries supplies one `-D LIB_SHARED_SQTAB_BASE=$<addr>` and the libraries agree.
+The contract pins *shape*, not *placement*. A consumer linking multiple sqtab-using libraries supplies one `-D 'LIB_SHARED_SQTAB_BASE=$<addr>'` and the libraries agree.
 
 **Export discipline (v0.8.5).** `LIB_SHARED_SQTAB_BASE` is consumer *input*. Libraries MUST NOT `.export` it: two libraries exporting the same unprefixed name is a guaranteed `ld65: Duplicate external identifier` in any composed link (the [#82](https://github.com/JC-000/c64-lib-contract/issues/82)-class failure, which hit §8.2's analogous equates). Fleet practice was already unanimous — no adopter exports it; this sentence makes the practice normative.
 
@@ -644,7 +646,7 @@ LIB_SHARED_REU_MUL_BANKS_USED = (1 .shl LIB_SHARED_REU_MUL_BANK) | (1 .shl (LIB_
 .assert LIB_SHARED_REU_MUL_BANK < $FE,     error, "reu_mul base bank must leave room for the hi-half bank at base+1"
 ```
 
-The `.ifndef` guards let each library assemble standalone with its existing default; the consumer overrides via `ca65 -D LIB_SHARED_REU_MUL_BANK=$<bank>` once and all consuming libraries agree. The `.assert`s catch misconfigurations at assemble time:
+The `.ifndef` guards let each library assemble standalone with its existing default; the consumer overrides via `ca65 -D 'LIB_SHARED_REU_MUL_BANK=$<bank>'` once and all consuming libraries agree. The `.assert`s catch misconfigurations at assemble time:
 
 - `LIB_SHARED_REU_MUL_OFFSET = $0000` — current adopters require start-of-bank for row-stride math. Annotated as a v0.x.0 constraint; loosen only on a justified non-zero need from a future adopter.
 - `LIB_SHARED_REU_MUL_BANK < $FE` — the table claims two contiguous banks (`base` and `base + 1`), so `base = $FF` has no successor.
@@ -690,7 +692,7 @@ LIB_<X>_SHARED_REU_MUL_BANKS_USED = LIB_SHARED_REU_MUL_BANKS_USED
 
 Libraries that honor the ZP/staging knobs SHOULD additionally export prefixed counterparts of those (`LIB_<X>_SHARED_REU_MUL_ZP_INIT_A`, …, `LIB_<X>_SHARED_REU_MUL_STAGE_HI`), same shape.
 
-**The exported value MUST be the value the code reads.** An export whose value the library's REU access paths do not actually consume certifies nothing — `c64-x25519`'s pre-#92 export was exactly this: code read `X25519_REU_BANK` at every access site while the §8.2 knob published a number nothing consumed, so `-D LIB_SHARED_REU_MUL_BANK=$04` succeeded silently, published 4, and read bank 0. Adopter review MUST grep the access paths for the knob, not just the export list.
+**The exported value MUST be the value the code reads.** An export whose value the library's REU access paths do not actually consume certifies nothing — `c64-x25519`'s pre-#92 export was exactly this: code read `X25519_REU_BANK` at every access site while the §8.2 knob published a number nothing consumed, so `-D 'LIB_SHARED_REU_MUL_BANK=$04'` succeeded silently, published 4, and read bank 0. Adopter review MUST grep the access paths for the knob, not just the export list.
 
 Consumer cross-check:
 
@@ -787,6 +789,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.8.6 — 2026-08-14
+
+Doc-only (PATCH, the 0.7.1 precedent): **every `$`-hex `-D` shell snippet was silently broken as pasted.** Unquoted `$40` is expanded by the shell as positional parameter `$4` + literal `0`, so `ca65 -D fp_src1=$40` assembles cleanly with the slot at address **`$00`** — no diagnostic at any stage (measured on sh and zsh, ca65 V2.18; found while testing the §6-restructuring defines-forwarding pattern for [#76](https://github.com/JC-000/c64-lib-contract/issues/76)). All pasteable `-D` command lines in §2/§3/§8.1 now single-quote the value; a normative `$`-hex quoting note joins §2's flag-spelling note, including the make-interface corollary (make variables/recipes MUST pass `$`-free decimal values — both `$40` and the `$$40` escape measured to produce 0 through make's expansion then the shell's). Seventh member of the copy-paste defect class (#41 `.and`, #50 `--asm-define`, #58/#74 `: abs`, #73 `.if`-on-import, #82 decorative export). Adopter repos copied the unquoted form into their own docs (e.g. x25519 `zp_config.s` comments, polyval `API.md`) and should re-check.
 
 ### 0.8.5 — 2026-08-14
 
