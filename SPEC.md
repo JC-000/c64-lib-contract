@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.8.0 (2026-08-14)
+**Version:** 0.8.1 (2026-08-14)
 **Status:** Draft — under joint review by adopters and consumers.
 
 ## 0. Scope and audience
@@ -24,7 +24,7 @@ Every library MUST export the following integer equates, where `<X>` is the libr
 | `LIB_<X>_VERSION_PATCH` | integer equate | Bug-fix release. No ABI change. |
 | `LIB_<X>_ABI_VERSION` | integer equate | Monotonic generation counter for the exported surface, **starting at 1**. Incremented on any breaking export change. Deliberately independent of MAJOR — see the note below. |
 
-The symbols live in a dedicated file, conventionally `src/lib_version.s`, and are exported via `.export`.
+The symbols live in a dedicated file, conventionally `src/lib_version.s`, and are exported via `.export ... : abs`. The `: abs` hint is required, not decorative: these are small integers, so ca65 infers **zeropage** for them without it, while a consumer's `.import` defaults to absolute — producing `ld65: Warning: Address size mismatch` at every import site. Same defect as the §8.4 macro exports fixed in v0.7.4 ([#58](https://github.com/JC-000/c64-lib-contract/issues/58)).
 
 **Deprecated bare forms (v0.7.0).** Through v0.x every library MUST *also* export the unprefixed `LIB_VERSION_MAJOR` / `LIB_VERSION_MINOR` / `LIB_VERSION_PATCH` / `LIB_ABI_VERSION`, so existing single-library consumers keep working unchanged. These names are **deprecated and scheduled for removal at contract v1.0**: they are identical across every library, so a consumer that links two of them and imports both manifests gets `ld65: Error: Duplicate external identifier` ([#43](https://github.com/JC-000/c64-lib-contract/issues/43)). The bare exports MUST be gated on `LIB_NO_BARE_EXPORTS` so a composing consumer can suppress them build-wide with `ca65 -D LIB_NO_BARE_EXPORTS=1`.
 
@@ -36,9 +36,7 @@ Consumers gate on this equate rather than on MINOR being "safe":
 
 ```asm
 .import LIB_X25519_ABI_VERSION
-.if LIB_X25519_ABI_VERSION <> 1
-    .error "c64-x25519 exported-surface generation changed; re-check the integration"
-.endif
+.assert LIB_X25519_ABI_VERSION = 1, lderror, "c64-x25519 exported-surface generation changed; re-check the integration"
 ```
 
 **TU isolation (required).** The bare exports MUST live in a translation unit that exports nothing else — no §5 manifest equates, no §8.4 table equates, no code. §8.4 requires the `LIB_PRECALC_TABLE` macro to be included from a single TU, and ld65 pulls in whole object members: if the bare names share a member with anything a consumer legitimately imports, they enter the link uninvited and collide even when the consumer never referenced them. `src/lib_version.s` holding only the block below satisfies this; §5's aggregate equates move to `src/lib_manifest.s`.
@@ -47,10 +45,10 @@ Consumers gate on this equate rather than on MINOR being "safe":
 
 ```asm
 ; src/lib_version.s — exports nothing but these
-.export LIB_X25519_VERSION_MAJOR
-.export LIB_X25519_VERSION_MINOR
-.export LIB_X25519_VERSION_PATCH
-.export LIB_X25519_ABI_VERSION
+.export LIB_X25519_VERSION_MAJOR: abs
+.export LIB_X25519_VERSION_MINOR: abs
+.export LIB_X25519_VERSION_PATCH: abs
+.export LIB_X25519_ABI_VERSION: abs
 
 LIB_X25519_VERSION_MAJOR = 0
 LIB_X25519_VERSION_MINOR = 8
@@ -60,10 +58,10 @@ LIB_X25519_ABI_VERSION   = 1
 .ifndef LIB_NO_BARE_EXPORTS
     ; Deprecated, removed at contract v1.0. Suppress with
     ; ca65 -D LIB_NO_BARE_EXPORTS=1 when composing two or more libraries.
-    .export LIB_VERSION_MAJOR
-    .export LIB_VERSION_MINOR
-    .export LIB_VERSION_PATCH
-    .export LIB_ABI_VERSION
+    .export LIB_VERSION_MAJOR: abs
+    .export LIB_VERSION_MINOR: abs
+    .export LIB_VERSION_PATCH: abs
+    .export LIB_ABI_VERSION: abs
 
     LIB_VERSION_MAJOR = LIB_X25519_VERSION_MAJOR
     LIB_VERSION_MINOR = LIB_X25519_VERSION_MINOR
@@ -80,10 +78,10 @@ Aliasing the bare names to the prefixed ones rather than restating the literals 
 .import LIB_X25519_VERSION_MAJOR
 .import LIB_X25519_VERSION_MINOR
 
-.if LIB_X25519_VERSION_MAJOR < 1 .and LIB_X25519_VERSION_MINOR < 8
-    .error "this consumer needs c64-x25519 v0.8 or later"
-.endif
+.assert (LIB_X25519_VERSION_MAJOR > 0) .or (LIB_X25519_VERSION_MINOR >= 8), lderror, "this consumer needs c64-x25519 v0.8 or later"
 ```
+
+**Why `.assert` / `lderror` rather than `.if` / `.error`.** `.if` needs an assembly-time constant, and an `.import`ed symbol has no value until link — ca65 rejects the guard outright with `Constant expression expected`, so an `.if`-based version gate never assembles at all rather than silently passing. `.assert` with the `lderror` action defers evaluation to ld65, which is the only stage that knows the imported value. The trade is that the guard fires at link rather than assemble time; it still fires before anything runs.
 
 A consumer linking two or more libraries builds them all with `-D LIB_NO_BARE_EXPORTS=1` and imports the prefixed forms only; the guard above then names which library is out of date instead of reporting one anonymous version.
 
@@ -752,6 +750,16 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.8.1 — 2026-08-14
+
+Doc-only (§1): fixed both consumer-side version-guard snippets, neither of which assembled, and added the missing `: abs` export hint to the §1 pattern.
+
+**The guards could not work.** Both used `.if` on an `.import`ed symbol — the ABI generation gate added in 0.7.5 and the `LIB_<X>_VERSION_*` gate added in 0.7.0. `.if` requires an assembly-time constant and an imported symbol has no value until link, so ca65 rejects the guard with `Constant expression expected`. A consumer pasting either got a build failure, not a working check. Both now use `.assert <expr>, lderror, "..."`, which defers evaluation to ld65 — the only stage that knows the value. Verified in both directions: the corrected form assembles, links clean against a satisfying version, and fails with the intended message against a too-old one. The clause now states why `.if` cannot be used here, since the reason is not obvious and the wrong form looks natural.
+
+**The `: abs` hint was missing.** §1's pattern exported the version equates unhinted. They are small integers, so ca65 infers zeropage while a consumer's `.import` defaults to absolute, producing `ld65: Warning: Address size mismatch` at every import site — the same defect fixed for the §8.4 macro in 0.7.4 ([#58](https://github.com/JC-000/c64-lib-contract/issues/58)), recurring in a clause written before that fix landed. All four adopters already ship `: abs` here, so the spec was behind its own implementations.
+
+Fourth and fifth instances of the copy-paste-facing-snippet class after [#41](https://github.com/JC-000/c64-lib-contract/issues/41) (`.and` vs `&`), [#50](https://github.com/JC-000/c64-lib-contract/issues/50) (`--asm-define` vs `-D`) and [#58](https://github.com/JC-000/c64-lib-contract/issues/58) — and the most severe of them, since a guard that cannot assemble is worse than one that merely warns. PATCH per §7 — no symbol, macro, section or build-target semantics change. Resolves [#73](https://github.com/JC-000/c64-lib-contract/issues/73) and [#74](https://github.com/JC-000/c64-lib-contract/issues/74).
 
 ### 0.8.0 — 2026-08-14
 
