@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.9.0 (2026-08-14)
+**Version:** 0.9.1 (2026-08-15)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -104,7 +104,7 @@ Every library that claims any ZP slots MUST publish them as `.exportzp`-ed equat
 | `polyval_` `pv_` | `c64-polyval` |
 | `cc20_` `poly_` `w32_` `ct_` `chacha_` | `c64-ChaCha20-Poly1305` |
 
-General-purpose scratch takes `<shortname>_zp_<role>` (e.g., `nistcurves_zp_tmp1`). Known migration items, riding the §6.5 rename window: `c64-nist-curves`' live bare `zp_tmp1`/`zp_tmp2`/`zp_ptr1`/`zp_ptr2` (#83); `c64-x25519`'s `poly_carry` (a `mul_8x8` carry byte, colliding with the `poly_` registration) renames into its `mul_` family; `c64-ChaCha20-Poly1305`'s bare `.importzp` names move in the same window.
+General-purpose scratch takes `<shortname>_zp_<role>` (e.g., `nistcurves_zp_tmp1`). Known migration items, riding the §6.5 rename window **with its suppression gate** (deprecated bare slot names sit behind `LIB_NO_BARE_EXPORTS`, per §6.5/#88 — an ungated bare alias would preserve the #83 collision for the window's whole duration): `c64-nist-curves`' live bare `zp_tmp1`/`zp_tmp2`/`zp_ptr1`/`zp_ptr2`; `c64-x25519`'s `poly_carry` (a `mul_8x8` carry byte, colliding with the `poly_` registration) renames into its `mul_` family; `c64-ChaCha20-Poly1305`'s bare `.importzp` names move in the same window.
 
 **Pattern:**
 
@@ -279,6 +279,8 @@ Two contract-normative make variables, both defaulting empty. The split is load-
 
 A §2 slot override delivered globally collides with every `.importzp` site — `Error: Symbol '<slot>' is already defined` (measured). The failure shape is silent until the first consumer override, because the library's own build defines nothing; a single-variable implementation passes its own CI and breaks in the consumer's hands. If the ZP-defining TU is built by a generic pattern rule, it needs an explicit rule to receive the scoped variable at all (measured in the first adopter implementation, [c64-nist-curves#104](https://github.com/JC-000/c64-nist-curves/pull/104)).
 
+**The scoping rule, stated once (v0.9.1):** a §2 slot define MUST reach **every TU that defines the slot** and MUST NOT reach **any TU that `.importzp`s it**. Everything else follows per-model: import-based libraries (one defining TU — nist-curves) scope `CONTRACT_ZP_DEFINES` to it; include/bake-everywhere libraries (every TU defines via `.ifndef`-guarded includes — polyval, x25519) deliver it globally, where narrowing to one object silently diverges slot addresses between that object and the rest — the mirror image of the `Symbol already defined` failure, measured from both directions in [c64-polyval#34](https://github.com/JC-000/c64-polyval/pull/34) and [c64-x25519#95](https://github.com/JC-000/c64-x25519/pull/95); consumer-assembled libraries (zero archive TUs define — chacha) need no scoped variable at all.
+
 Values MUST be `$`-free — `0x` hex or decimal, per §2's `$`-hex quoting note:
 
 ```sh
@@ -315,6 +317,8 @@ The following are contract surface, subject to §7 semver and the rename window 
 Archive member basenames are a flat namespace under `ar65` composition and extraction tooling — today `lib_version.o` and `lib_manifest.o` ship in all four adopters, `zp_config.o` in three. At each library's next MAJOR, member basenames MUST take the `<shortname>_` prefix (`x25519_lib_version.o`). Members cannot carry two names at once, which is why this rides MAJOR rather than a window.
 
 **Rename window (the [#70](https://github.com/JC-000/c64-lib-contract/issues/70) rule).** Any rename of a surface element MUST ship both names for at least one MINOR release, the old form documented as deprecated, before removal at the next MAJOR (or v1.0, whichever comes first). Elements that cannot dual-name (archive members) change only at MAJOR.
+
+**Suppression gate for colliding old forms ([#88](https://github.com/JC-000/c64-lib-contract/issues/88), v0.9.1).** When the old form is itself a cross-library collision — the #83 ZP names being the motivating case — an ungated dual-name preserves the defect for the whole window: a composed link is no better off the day the window opens than the day before, and §2's registry migration would be blocked by the very rule that schedules it. Therefore: **a dual-named old form that collides across libraries MUST sit behind a consumer-settable suppression define, and the canonical gate for bare-name cases is the existing `LIB_NO_BARE_EXPORTS`** (the §1 precedent — composing consumers already build every library with it, so composed links are collision-free from the day the window opens, while single-library consumers keep the old names untouched).
 
 ### 6.6 Consumer footprint asserts — RESERVED
 
@@ -672,7 +676,9 @@ The contract pins *shape*, not *placement*. A consumer linking multiple sqtab-us
 
 **Deferral means import, never stub (v0.9.0).** A build that defines `SHARED_SQTAB_INIT` MUST `.import` the provider's `mul_tables_init`; exporting a stub body (`rts`) under the deferred name is non-conformant — it puts two same-named canonical inits into every composed link, which is the duplicate-identifier failure the switch exists to remove (measured in the [#82](https://github.com/JC-000/c64-lib-contract/issues/82)/[#83](https://github.com/JC-000/c64-lib-contract/issues/83) composed-link audit: twelve residual duplicates, this class among them).
 
-**Table names (v0.9.0).** `sqtab_lo` / `sqtab_hi` are the canonical exported names. `c64-x25519`'s historical `sqr_lo` / `sqr_hi` become deprecated aliases under the §6.5 window — the prior state (init name colliding while table names diverged) was simultaneously collision-prone and non-interchangeable.
+**Table names (v0.9.1, correcting v0.9.0).** `sqtab_lo` / `sqtab_hi` are the canonical names, **ratifying what every adopter already does** — the v0.9.0 text claimed `c64-x25519` used a `sqr_lo`/`sqr_hi` dialect and scheduled a deprecation; that was a misreading (x25519's `sqr_lo`/`sqr_hi` is a *different table*, the 512-byte a² diagonal-squaring lookup read by `fe25519_sqr`, and its quarter-square table has been `sqtab_lo`/`sqtab_hi` since before §8.1 adoption). No rename obligation exists.
+
+**Canonical does not mean exported (v0.9.1).** `sqtab_lo`/`sqtab_hi` derive from the consumer-input `LIB_SHARED_SQTAB_BASE`, so the v0.8.5 export discipline applies: they are *source-level* names each consuming TU derives via the header pattern above, and libraries MUST NOT `.export` them — an SMC-dispatching consumer needs the base at assemble time anyway, the linker never needs the symbol, and two exporters collide in any composed link. (`c64-x25519` already conforms; `c64-nist-curves`' current bare export of both is a §6.5-window migration item, gated per #88.)
 
 **Bit allocation.** This primitive owns bit `$0001`:
 
@@ -757,10 +763,16 @@ Page alignment and adjacent placement of the two stage buffers are required by t
 What a §8.2-consuming library MUST export instead is its library-prefixed *output* counterparts of the three placement equates, so a consumer can verify that co-linked libraries agree on placement:
 
 ```asm
-; library side — in the TU that consumes the §8.2 knobs
-LIB_<X>_SHARED_REU_MUL_BANK       = LIB_SHARED_REU_MUL_BANK
-LIB_<X>_SHARED_REU_MUL_OFFSET     = LIB_SHARED_REU_MUL_OFFSET
-LIB_<X>_SHARED_REU_MUL_BANKS_USED = LIB_SHARED_REU_MUL_BANKS_USED
+; library side — in the TU that consumes the §8.2 knobs.
+; Alias the symbol the REU access paths actually READ. If the code reads the
+; knob directly, that is the knob; if it reads a §3 alias of the knob
+; (e.g. LIB_<X>_REU_BANK_MUL), alias THAT — aliasing the knob would publish a
+; stale value whenever a consumer overrides the §3 alias directly, the exact
+; decorative-export defect this clause bans (both override spellings must
+; track: measured in c64-nist-curves#105).
+LIB_<X>_SHARED_REU_MUL_BANK       = <the bank symbol the code reads>
+LIB_<X>_SHARED_REU_MUL_OFFSET     = <the offset symbol the code reads>
+LIB_<X>_SHARED_REU_MUL_BANKS_USED = (1 .shl LIB_<X>_SHARED_REU_MUL_BANK) | (1 .shl (LIB_<X>_SHARED_REU_MUL_BANK + 1))
 .export LIB_<X>_SHARED_REU_MUL_BANK:       abs
 .export LIB_<X>_SHARED_REU_MUL_OFFSET:     abs
 .export LIB_<X>_SHARED_REU_MUL_BANKS_USED: abs
@@ -789,7 +801,11 @@ Libraries that ship adjacent caches keyed off the canonical table — e.g., `c64
 
 **Migration shape.** Each adopting library MAY keep its existing per-lib `reu_mul_init` exported for backwards compatibility. Under `.ifdef SHARED_REU_MUL_INIT`, the library's own un-doubled-banks init body is gated out and the canonical `reu_mul_tables_init` takes over. Library-private init for adjacent caches (above) stays under its own build-time gate and is invoked alongside the canonical init from the library's existing entry. A consumer flips libraries to the shared init one at a time without an atomic cross-repo cutover.
 
-**Fetch and staging deferral (v0.9.0).** `SHARED_REU_MUL_INIT` gates init only; the per-row fetch and the staging surface (`reu_fetch_mul_row`, `mul_dma_lo` / `mul_dma_hi`, `mul_cached_a`, `mul_src2_buf`) were previously exported unconditionally by both REU adopters, so every composed link carried two canonical fetches regardless of init deferral. A second switch, **`SHARED_REU_MUL_FETCH`**, gates them the same way. The §8.1 import-never-stub rule applies to both switches: a deferring build MUST `.import` the provider's entries and staging labels.
+**Fetch deferral (v0.9.1, correcting v0.9.0).** `SHARED_REU_MUL_INIT` gates init only; the per-row fetch was exported unconditionally by both REU adopters, so every composed link carried two canonical fetches regardless of init deferral. A second switch, **`SHARED_REU_MUL_FETCH`**, gates the fetch surface — which is exactly two symbols: **`reu_fetch_mul_row`** and the SMC bank-patch label **`reu_fetch_mul_row_bank_patch`** (promoted here from the #15 delegation mechanism; adjacent-cache fetches like `reu_fetch_doubled_row` delegate their first DMA through it, so deferral under `SQR_DMA_K > 0` requires the provider to export it). The §8.1 import-never-stub rule applies: a deferring build MUST `.import` both from the provider.
+
+The v0.9.0 text also gated `mul_dma_lo`/`mul_dma_hi`, `mul_cached_a` and `mul_src2_buf`; that was an overreach — those are adopter-private buffers (in `c64-x25519`, `mul_src2_buf` is the fe25519 operand-copy buffer the fetch never touches, and `mul_cached_a` is dual-purpose scratch), and deferring them would point a library's own field arithmetic at another library's memory. Staging *placement* is already the job of the unexported `LIB_SHARED_REU_MUL_STAGE_LO`/`_HI` input equates. The four bare labels instead move to the **rename track**: `mul_` is registered to `c64-x25519` in the §2 registry, so `c64-nist-curves`' `mul_dma_*`/`mul_cached_a`/`mul_src2_buf` take its own prefix under the §6.5 window (suppression-gated per #88), and x25519's remain under its registration.
+
+**The two switches move together (v0.9.1).** A build MUST define `SHARED_REU_MUL_INIT` and `SHARED_REU_MUL_FETCH` both or neither; partial deferral is non-conformant. Bit `$0002` (`LIB_SHARED_PRIMITIVES_REU_MUL`) drops from the §8.0 mask exactly when both are defined. Rationale: the bit asserts ownership of *the primitive*, and a build that defers init while still exporting the canonical fetch is an owner of the fetch that is not an owner of the primitive — a state the §8.0 three-state table has no row for. If a future consumer demonstrates a need for split ownership, that is a §8.0 fourth-state proposal, not a silent partial deferral.
 
 **Bit allocation.** This primitive owns bit `$0002`:
 
@@ -867,6 +883,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.9.1 — 2026-08-15
+
+Two things in one PATCH, both correction-shaped. **First, recovery:** three review amendments intended for 0.9.0 were pushed to the PR branch after the merge click and silently missed main *and* the `v0.9.0` tag (the merge-event-vs-merged-content variant of the fleet's stacked-PR lesson — verify the merged tree, not the merge notification). Re-landed here: §6.5's suppression gate for colliding old forms ([#88](https://github.com/JC-000/c64-lib-contract/issues/88), `LIB_NO_BARE_EXPORTS` canonical), the §2 registry's gate note, and the §8.2 export example aliasing the code-read symbol ([nist#105](https://github.com/JC-000/c64-nist-curves/pull/105)). **Second, the four defects from the [c64-x25519 adoption report](https://github.com/JC-000/c64-lib-contract/issues/76):** (A) §8.1 "Table names" was factually wrong — x25519's `sqr_lo`/`sqr_hi` is its a² diagonal-squaring table, not a sqtab dialect; the clause now ratifies `sqtab_lo`/`sqtab_hi` as what every adopter already does, and rules that **canonical does not mean exported** (they derive from consumer input; nist's bare export becomes a gated window item). (B) §8.2's fetch-deferral surface narrowed to `reu_fetch_mul_row` + the promoted `reu_fetch_mul_row_bank_patch` SMC label (#15); the four bare buffer labels were adopter-private overreach and move to the rename track under the §2 registry. (C) `SHARED_REU_MUL_INIT`/`SHARED_REU_MUL_FETCH` MUST move together — partial deferral created a §8.0 ownership state with no table row; split ownership, if ever needed, is a fourth-state proposal. (D) §6.2's ZP scoping restated as the model-independent rule: slot defines reach every TU that *defines* the slot and never a TU that `.importzp`s it — measured failures exist in both directions (polyval#34, x25519#95). Also recorded: x25519's §6.4 half-2 evidence (pre-migration COLD over-claimed up to +164 % in deferral builds; per-switch deltas now encoded and locked adopter-side).
 
 ### 0.9.0 — 2026-08-14
 
