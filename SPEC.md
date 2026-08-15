@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.8.6 (2026-08-14)
+**Version:** 0.9.0 (2026-08-14)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -94,6 +94,17 @@ Where a consumer pins to a specific library version via git submodule SHA, the `
 Every library that claims any ZP slots MUST publish them as `.exportzp`-ed equates in a dedicated `src/zp_config.s` (or `.inc`) file. Each equate MUST be `.ifndef`-guarded so a consumer can override the slot via `ca65 -D <slot>=$<addr>`.
 
 **Naming convention:** `<lib_prefix>_<role>`, lower-case (e.g., `fp_src1`, `cc20_state`, `x25519_w_lo`). The prefix keeps slots from colliding across libraries when a consumer links several.
+
+**ZP prefix registry (v0.9.0).** Every exported slot name MUST begin with a prefix registered here to exactly one library; intake of a new adopter checks its ZP surface against this table exactly as §8.0 checks bit claims. Same-named slots across two libraries are always a defect unless the name is a §8.x canonical contract item — deliberate cross-library sharing is expressed only through §8.x clauses, never through incidental name equality (the [#83](https://github.com/JC-000/c64-lib-contract/issues/83) failure class: three adopters independently converged on bare `zp_tmp1`/`zp_ptr1`, two shipped them, and the resulting duplicate-identifier error was the only thing preventing a measured 12-byte silent address overlap between actively-used scratch).
+
+| Prefixes | Registered to |
+|---|---|
+| `fp_` `ec_` `sha_` `nistcurves_` | `c64-nist-curves` |
+| `fe25519_` `fe_` `x25_` `mul_` `sqr_` `x25519_` | `c64-x25519` |
+| `polyval_` `pv_` | `c64-polyval` |
+| `cc20_` `poly_` `w32_` `ct_` `chacha_` | `c64-ChaCha20-Poly1305` |
+
+General-purpose scratch takes `<shortname>_zp_<role>` (e.g., `nistcurves_zp_tmp1`). Known migration items, riding the §6.5 rename window: `c64-nist-curves`' live bare `zp_tmp1`/`zp_tmp2`/`zp_ptr1`/`zp_ptr2` (#83); `c64-x25519`'s `poly_carry` (a `mul_8x8` carry byte, colliding with the `poly_` registration) renames into its `mul_` family; `c64-ChaCha20-Poly1305`'s bare `.importzp` names move in the same window.
 
 **Pattern:**
 
@@ -236,17 +247,78 @@ And let a CI bot decide whether to even attempt a build against a new library ve
 
 The numbers MAY be approximate — within 5% is fine. The library author refreshes them when a release substantively changes any one of them.
 
-## 6. Build target conventions
+## 6. Build and consume
+
+Obligations in this chapter attach to **archives** — the artifacts a consumer links — not to "the library" in the abstract. A library shipping nine variant archives satisfies each clause nine times or not at all. This is the noun correction motivating the v0.9.0 restructuring: per-library phrasing let per-variant truth fall through the gap (§6.4).
+
+### 6.1 Targets and artifact names
 
 The library's Makefile MUST provide:
 
 - `make` (no args) — build the standalone test PRG. Library author's primary integration target; what `make test` and `make bench` depend on.
-- `make lib` — build a single archive `build/lib/<libname>.a` containing every exported symbol the library ships. The reasonable default for consumers that want the whole library.
-- `make lib-<variant>` — minimal-subset archives for primary consumer use cases. Variants are library-specific (e.g., `make lib-p256-verify` for `c64-nist-curves` excludes the Lim-Lee fixed-base comb; `make lib-x25519-scalarmult` for `c64-x25519` excludes benchmark helpers).
+- `make lib` — the full archive `build/lib/<shortname>.a`, containing every exported symbol the library ships.
+- `make lib-<variant>` — minimal-subset archives for primary consumer use cases, at `build/lib/<shortname>-<variant>.a`. Variants are library-specific.
+- `make lib-app-owned` — §6.3, required of §8.x-consuming libraries.
 
-Output goes in `build/lib/<libname>-<variant>.a` for variants, `build/lib/<libname>.a` for the full archive.
+`<shortname>` is the library's §1 prefix, lowercased (`nistcurves`, `x25519`, `polyval`, `chacha20poly1305`). Archive basenames that differ today (`libx25519.a`, `c64-chacha20-poly1305.a`) are deprecated dialects: ship the canonical basename alongside the old one from the library's next MINOR release, drop the old form at its next MAJOR (§6.5 window).
 
-Consumers fetch `build/lib/<libname>-<variant>.a` and link directly. No mid-build `sed`. No copying intermediates around.
+The `lib` / `lib-*` make-target namespace is reserved for targets that produce archives. Check and verification targets MUST NOT use it; existing `lib-verify`-style names are grandfathered until each repo's next MAJOR, new ones take `check-*` / `verify-*`.
+
+Consumers fetch `build/lib/<shortname>[-<variant>].a` and link directly. No mid-build `sed`, no copying intermediates around, and **no `ar65` member surgery** — an archive whose member set a consumer has edited is outside every §5/§8.0 manifest claim it ships. §6.2 and §6.3 exist so surgery is never the only route to a configuration.
+
+### 6.2 Consumer defines reach the build
+
+Every §6.1 target MUST accept consumer-supplied ca65 defines without the consumer editing the Makefile or replacing a flag variable wholesale. A hard-assigned `CA65FLAGS` a consumer must clobber to inject one `-D` is non-conformant — the clobber silently drops `-t c64` and include paths (measured: `Error: Cannot open include file` at best, a mis-targeted assemble at worst).
+
+Two contract-normative make variables, both defaulting empty. The split is load-bearing, not stylistic:
+
+| Variable | Reaches | Carries |
+|---|---|---|
+| `CONTRACT_DEFINES` | **every** archive-member recipe | variant/profile selectors, §8.x deferral switches, `LIB_SHARED_SQTAB_BASE`, `LIB_SHARED_REU_MUL_*` placement, `LIB_NO_BARE_EXPORTS` |
+| `CONTRACT_ZP_DEFINES` | **only** the ZP-defining TU(s) | §2 slot overrides |
+
+A §2 slot override delivered globally collides with every `.importzp` site — `Error: Symbol '<slot>' is already defined` (measured). The failure shape is silent until the first consumer override, because the library's own build defines nothing; a single-variable implementation passes its own CI and breaks in the consumer's hands. If the ZP-defining TU is built by a generic pattern rule, it needs an explicit rule to receive the scoped variable at all (measured in the first adopter implementation, [c64-nist-curves#104](https://github.com/JC-000/c64-nist-curves/pull/104)).
+
+Values MUST be `$`-free — `0x` hex or decimal, per §2's `$`-hex quoting note:
+
+```sh
+make lib CONTRACT_ZP_DEFINES='-D fp_src1=0x50'
+```
+
+All members of one archive MUST be assembled under the same `CONTRACT_DEFINES` — one configuration per artifact; §6.4 makes the manifest attest to it.
+
+A library MAY instead ship its ZP-defining TU as **consumer-assembled source** rather than an archive member (the `c64-ChaCha20-Poly1305` model): archive TUs `.importzp` every slot, and the consumer assembles the library's `zp_config.s` into their own build, applying slot overrides there. Such a library needs no `CONTRACT_ZP_DEFINES`; its integration doc MUST state where overrides go instead. This model is the recommended shape for new libraries — it is the only one where a slot override requires no library rebuild at all.
+
+### 6.3 Every contemplated configuration is reachable
+
+Every configuration this contract contemplates — each §8.0 ownership state, each deferral combination, each documented variant/profile axis — MUST be reachable through §6.1 targets plus §6.2 defines, with no library edits.
+
+One named convenience target is REQUIRED of every library that consumes any §8.x primitive: `make lib-app-owned`, building `build/lib/<shortname>-app-owned.a` — the `lib` member set assembled with **all** of the library's applicable §8.x deferral switches defined. Which switches a library can defer is library-specific knowledge; the target encapsulates it so a consumer can request §8.0's `APP_OWNED` shape without knowing the switch list. Per §8.0's conditional-mask rule the resulting manifest attests the deferral (`LIB_<X>_SHARED_PRIMITIVES` drops the deferred bits; `LIB_<X>_SHARED_CONSUMES` keeps them).
+
+No further target matrix is required or wanted — finer combinations ride `CONTRACT_DEFINES` on existing targets, and every additional target name enlarges the §6.5 surface #70 must then freeze.
+
+### 6.4 The manifest describes the archive it ships in
+
+The per-variant rule ([#62](https://github.com/JC-000/c64-lib-contract/issues/62)), stated per-TU with both halves required: every TU contributing §5 or §8.0 manifest equates MUST be
+
+1. **assembled under the same configuration** (defines, profile, variant) as the archive it ships in, and
+2. **gated on the same switches** that gate the code and exports it describes.
+
+Half 1 without half 2 is the measured chacha shape — per-variant object directories dutifully assembling byte-identical manifests from an ungated source, the trimmed archive claiming the full build's 16 896 B against a measured 16 513. Half 2 without half 1 is the measured nist shape — one manifest TU per-variant and another not, one archive half-right.
+
+Manifest equate *names* stay per-library (`LIB_<X>_RESIDENT_BYTES`); variant identity lives in which archive the TU ships in, never in the name. Variant-mangled equate names (`LIB_<X>_<VARIANT>_RESIDENT_BYTES`) are deprecated: any existing ones stay exported until that library's next MAJOR, valued equal to the canonical equate inside the variant's own archives.
+
+### 6.5 The consumer-facing name surface
+
+The following are contract surface, subject to §7 semver and the rename window below: exported symbols and their `LIB_<X>_` families; §2 ZP slot names (registry in §2); §4 segment names; archive basenames (§6.1); **archive member basenames**; make target names (§6.1); the §6.2 variables and every define family they forward.
+
+Archive member basenames are a flat namespace under `ar65` composition and extraction tooling — today `lib_version.o` and `lib_manifest.o` ship in all four adopters, `zp_config.o` in three. At each library's next MAJOR, member basenames MUST take the `<shortname>_` prefix (`x25519_lib_version.o`). Members cannot carry two names at once, which is why this rides MAJOR rather than a window.
+
+**Rename window (the [#70](https://github.com/JC-000/c64-lib-contract/issues/70) rule).** Any rename of a surface element MUST ship both names for at least one MINOR release, the old form documented as deprecated, before removal at the next MAJOR (or v1.0, whichever comes first). Elements that cannot dual-name (archive members) change only at MAJOR.
+
+### 6.6 Consumer footprint asserts — RESERVED
+
+The declared-footprint + consumer-assert pattern ([#69](https://github.com/JC-000/c64-lib-contract/issues/69)) enters this chapter one MINOR release after §6.4 is verified in at least two adopters' shipped archives — the #62-before-#69 gate, held from both sides. Reserved here so §6 numbering is stable when it lands.
 
 ## 7. Semver expectations
 
@@ -598,6 +670,10 @@ The contract pins *shape*, not *placement*. A consumer linking multiple sqtab-us
 
 **Migration shape.** Each adopting library MAY keep its existing per-lib `sqtab_init` exported for backwards compatibility. Under `.ifdef SHARED_SQTAB_INIT`, the library's own init body is gated out and the canonical `mul_tables_init` takes over. This lets a consumer flip libraries to the shared init one at a time without an atomic cross-repo cutover.
 
+**Deferral means import, never stub (v0.9.0).** A build that defines `SHARED_SQTAB_INIT` MUST `.import` the provider's `mul_tables_init`; exporting a stub body (`rts`) under the deferred name is non-conformant — it puts two same-named canonical inits into every composed link, which is the duplicate-identifier failure the switch exists to remove (measured in the [#82](https://github.com/JC-000/c64-lib-contract/issues/82)/[#83](https://github.com/JC-000/c64-lib-contract/issues/83) composed-link audit: twelve residual duplicates, this class among them).
+
+**Table names (v0.9.0).** `sqtab_lo` / `sqtab_hi` are the canonical exported names. `c64-x25519`'s historical `sqr_lo` / `sqr_hi` become deprecated aliases under the §6.5 window — the prior state (init name colliding while table names diverged) was simultaneously collision-prone and non-interchangeable.
+
 **Bit allocation.** This primitive owns bit `$0001`:
 
 ```asm
@@ -713,6 +789,8 @@ Libraries that ship adjacent caches keyed off the canonical table — e.g., `c64
 
 **Migration shape.** Each adopting library MAY keep its existing per-lib `reu_mul_init` exported for backwards compatibility. Under `.ifdef SHARED_REU_MUL_INIT`, the library's own un-doubled-banks init body is gated out and the canonical `reu_mul_tables_init` takes over. Library-private init for adjacent caches (above) stays under its own build-time gate and is invoked alongside the canonical init from the library's existing entry. A consumer flips libraries to the shared init one at a time without an atomic cross-repo cutover.
 
+**Fetch and staging deferral (v0.9.0).** `SHARED_REU_MUL_INIT` gates init only; the per-row fetch and the staging surface (`reu_fetch_mul_row`, `mul_dma_lo` / `mul_dma_hi`, `mul_cached_a`, `mul_src2_buf`) were previously exported unconditionally by both REU adopters, so every composed link carried two canonical fetches regardless of init deferral. A second switch, **`SHARED_REU_MUL_FETCH`**, gates them the same way. The §8.1 import-never-stub rule applies to both switches: a deferring build MUST `.import` the provider's entries and staging labels.
+
 **Bit allocation.** This primitive owns bit `$0002`:
 
 ```asm
@@ -757,7 +835,7 @@ Both follow-ups from this clause are resolved: #14's evidence gate (cross-adopte
 
 **Canonical entry.** `ct_mul_8x8`. Adopters whose historical name is `mul_8x8` keep it exported as a back-compat alias of `ct_mul_8x8` (same address).
 
-**Migration shape.** Each adopting library gates its own copy under `.ifdef SHARED_CT_MUL_8X8`. When a consumer defines that switch, the library's private body is gated out and the canonical `ct_mul_8x8` provided by the designated owner takes over. This mirrors the §8.1 `SHARED_SQTAB_INIT` switch and lets a consumer flip libraries one at a time without an atomic cross-repo cutover.
+**Migration shape.** Each adopting library gates its own copy under `.ifdef SHARED_CT_MUL_8X8`. When a consumer defines that switch, the library's private body is gated out and the canonical `ct_mul_8x8` provided by the designated owner takes over. This mirrors the §8.1 `SHARED_SQTAB_INIT` switch and lets a consumer flip libraries one at a time without an atomic cross-repo cutover. The §8.1 import-never-stub rule (v0.9.0) applies: a deferring build MUST `.import` the provider's `ct_mul_8x8`, never export a stub under the canonical name.
 
 **Bit allocation.** This primitive owns bit `$0004`:
 
@@ -789,6 +867,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.9.0 — 2026-08-14
+
+Normative (MINOR — the [#76](https://github.com/JC-000/c64-lib-contract/issues/76) restructuring, phase 1). **§6 becomes the build-and-consume chapter**, growing from 11 lines to six clauses; obligations now attach to *archives*, not "the library". New: §6.2 defines-forwarding with the contract-normative `CONTRACT_DEFINES` (global) / `CONTRACT_ZP_DEFINES` (ZP-defining-TU-scoped) pair — the split is measured, not stylistic: a globally-delivered slot override collides with every `.importzp` site, and a single-variable implementation passes the library's own CI while breaking the first consumer override ([nist#104](https://github.com/JC-000/c64-nist-curves/pull/104)). §6.3 reachability + required `lib-app-owned` target (encapsulating library-specific deferral-switch knowledge). §6.4 per-variant manifest rule from #62, both halves stated per-TU with the two measured single-half failures. §6.5 the name-surface enumeration incl. archive member basenames (`<shortname>_` prefix at next MAJOR) and the #70 rename window. §6.6 reserved for #69 per the #62-before-#69 gate. **§2 gains the ZP prefix registry** (#83): per-library prefix table checked at intake, same-name-across-libraries always a defect unless §8.x-canonical, general scratch takes `<shortname>_zp_<role>`. **§8.1/§8.2/§8.3 deferral completion**: import-never-stub rule; `SHARED_REU_MUL_FETCH` switch closing the both-adopters-always-own-the-fetch gap; `sqtab_lo`/`sqtab_hi` canonical over `sqr_*`. Archive basenames standardize on `<shortname>[-<variant>].a` under the window. Consolidates #62/#70/#72 (spec side) and the #82/#83 structural remainders; #69 explicitly deferred. Adopter-verified inputs: nist#104 (A.1 two-variable + pattern-rule caveat), chacha#75 (`lib-app-owned` precedent), the four R2 ZP audits, and the item-B surface table + addenda on #76.
 
 ### 0.8.6 — 2026-08-14
 
