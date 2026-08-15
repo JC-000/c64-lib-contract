@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.10.5 (2026-08-15)
+**Version:** 0.10.6 (2026-08-15)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -921,6 +921,8 @@ Both follow-ups from this clause are resolved: #14's evidence gate (cross-adopte
 
 **Canonical entry.** `ct_mul_8x8`. Adopters whose historical name is `mul_8x8` keep it exported as a back-compat alias of `ct_mul_8x8` (same address).
 
+**Provider surface (v0.10.6).** The names above describe the calling convention; this paragraph makes them an obligation, because the convention is unusable across TUs without them. A §8.3 provider MUST export, and a deferring adopter MUST `.import` where referenced (§8.2's import-never-stub discipline): `ct_mul_8x8` itself, the two SMC operand sites `smc_sum_a_imm` / `smc_diff_a_imm` (the caller bakes `a` into their `+1` immediates — they are load-bearing entry state, not internals), and the product scratch `poly_prod_lo` / `poly_prod_hi`. Both current providers already export all five by convergent necessity (`c64-ChaCha20-Poly1305` `poly1305_lib.s`, `c64-x25519` `mul_8x8.s`), and `c64-x25519`'s own field layer consumes the SMC pair by import — but nothing required it, so a future provider exporting only the entry point would satisfy this clause as previously written and strand every deferring consumer at link ([nist#123](https://github.com/JC-000/c64-nist-curves/issues/123), where the deferring side of the same gap — a `SHARED_CT_MUL_8X8` gate that removed definitions without adding the imports — made APP_OWNED × on-chip unreachable and failed only in the combination CI never built). The gating corollary is explicit: a deferral switch MUST leave behind `.import`s for every name in this list that the TU's remaining code references — gating out a definition without importing its replacement is the assemble-time sibling of §6.3's looks-reachable failure.
+
 **Migration shape.** Each adopting library gates its own copy under `.ifdef SHARED_CT_MUL_8X8`. When a consumer defines that switch, the library's private body is gated out and the canonical `ct_mul_8x8` provided by the designated owner takes over. This mirrors the §8.1 `SHARED_SQTAB_INIT` switch and lets a consumer flip libraries one at a time without an atomic cross-repo cutover. The §8.1 import-never-stub rule (v0.9.0) applies: a deferring build MUST `.import` the provider's `ct_mul_8x8`, never export a stub under the canonical name.
 
 **Bit allocation.** This primitive owns bit `$0004`:
@@ -1149,6 +1151,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.10.6 — 2026-08-15
+
+Doc/clarification (PATCH): **§8.3 gains the provider-surface enumeration** ([nist#123](https://github.com/JC-000/c64-nist-curves/issues/123)). The clause pinned the body byte-identically and named the canonical entry, but the five names the calling convention actually needs cross-TU — `ct_mul_8x8`, the `smc_sum_a_imm`/`smc_diff_a_imm` SMC operand sites, `poly_prod_lo`/`poly_prod_hi` — were described semantically and never required as exports. Both providers export all five today by convergent necessity, not obligation; the deferring side of the same gap was measured live: `c64-nist-curves`' `SHARED_CT_MUL_8X8` gate removed the definitions without adding imports, so `-D SHARED_CT_MUL_8X8` failed to assemble against the on-chip TU and APP_OWNED × on-chip was unreachable (§6.3) — caught by the first consumer to build that combination, not by CI, which never does. The gating corollary is stated: a deferral switch MUST leave `.import`s behind for every referenced name it un-defines — the assemble-time sibling of v0.10.5's looks-reachable rule.
 
 ### 0.10.5 — 2026-08-15
 
