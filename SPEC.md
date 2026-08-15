@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.10.2 (2026-08-15)
+**Version:** 0.10.3 (2026-08-15)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -514,7 +514,9 @@ APP_OWNED = LIB_SHARED_PRIMITIVES_SQTAB   ; primitives provided by the consumer'
 
 Without the coverage assert, the missing-provider failure mode is an ld65 unresolved external at best (when the deferring library imports the canonical entry point) and a silent wrong-result at worst (table read with no init); with it, the failure is a named assemble-time error. *Link-time note (v0.7.0):* importing manifest equates from two libraries used to collide on the unprefixed §1/§8.4 symbols ([#43](https://github.com/JC-000/c64-lib-contract/issues/43)). Adopters that have shipped the v0.7.0 prefixed forms compose directly: build every library with `ca65 -D LIB_NO_BARE_EXPORTS=1` and import the `LIB_<X>_*` equates from each. Against a library still on the bare-only forms, the §8.4 `od65 --dump-exports` out-of-band pattern remains the fallback for that library — noting that `od65` reads objects, not archives, so a consumer holding only that library's shipped `.a` extracts its members first (§8.0, "Auditing a shipped archive").
 
-#### Catch loop: enumeration at adopter intake
+### 8.4 Precalc-table enumeration — the catch loop (heading added v0.10.3)
+
+> Numbering and provenance note: the fleet has cited this clause as **§8.4** since v0.7.0 (13 references in this document, 70+ per adopter repo, and one inside the canonical macro source itself) — but the heading never existed: the clause lived as an unnumbered block inside §8.0, which every citation survived on faith. [#109](https://github.com/JC-000/c64-lib-contract/issues/109) caught it. This heading makes the fleet's number real; it sits here, inside the §8.0 flow it grew out of, because numbers are stable identifiers, not positions (§0). Older prose and the canonical `precalc_table.inc` header comment say "§8.0 catch-loop" — same clause, historical spelling.
 
 A primitive becomes a §8.x candidate only after duplication is confirmed across two or more adopters. The first two §8.x clauses (`sqtab`, `reu_mul`) were both found by ad-hoc audit after the duplication had been in place for one or more releases. To make detection systematic rather than reactive, every adopter MUST enumerate its precalculated tables in a consumer-readable form at intake (per [adopters.md](adopters.md) "How to add your library" step 6).
 
@@ -752,7 +754,7 @@ Adopters OR this bit into their `LIB_<X>_SHARED_PRIMITIVES` manifest equate (§5
 LIB_<X>_SHARED_PRIMITIVES = LIB_SHARED_PRIMITIVES_SQTAB
 ```
 
-**§8.0 catch-loop registry.** Adopters consuming this primitive MUST emit, in addition to the manifest-equate bit above, one §8.0 catch-loop macro invocation:
+**§8.4 catch-loop registry.** Adopters consuming this primitive MUST emit, in addition to the manifest-equate bit above, one §8.4 catch-loop macro invocation:
 
 ```ca65
 LIB_PRECALC_TABLE "sqtab", 1024, PRECALC_REGION_RAM, PRECALC_SHARED_YES, "<X>"
@@ -877,7 +879,7 @@ LIB_SHARED_PRIMITIVES_REU_MUL = $0002
 
 Adopters OR it into their `LIB_<X>_SHARED_PRIMITIVES` manifest equate (§5) and the existing §8.0 `.assert` catches accidental cross-library double-ownership.
 
-**§8.0 catch-loop registry.** Adopters consuming this primitive MUST emit, in addition to the manifest-equate bit above, one §8.0 catch-loop macro invocation:
+**§8.4 catch-loop registry.** Adopters consuming this primitive MUST emit, in addition to the manifest-equate bit above, one §8.4 catch-loop macro invocation:
 
 ```ca65
 LIB_PRECALC_TABLE "reu_mul", 131072, PRECALC_REGION_REU, PRECALC_SHARED_YES, "<X>"
@@ -923,7 +925,7 @@ LIB_SHARED_PRIMITIVES_CT_MUL_8X8 = $0004
 
 Adopters include this bit in their `LIB_<X>_SHARED_PRIMITIVES` manifest equate using the **conditional** mask construction of §8.0 — the bit is dropped when this build defines `SHARED_CT_MUL_8X8` (i.e. defers the body to a provider). The `$0004` → `SHARED_CT_MUL_8X8` mapping is registered in the §8.0 deferral-switch table.
 
-**No §8.0 catch-loop registry entry.** §8.0's `LIB_PRECALC_TABLE` enumeration covers precalculated *tables*; `ct_mul_8x8` is a code body, not a table, so it takes **no** `LIB_PRECALC_TABLE` invocation. Its data dependency — the §8.1 `sqtab` table — is already enumerated under §8.1.
+**No §8.4 catch-loop registry entry.** §8.0's `LIB_PRECALC_TABLE` enumeration covers precalculated *tables*; `ct_mul_8x8` is a code body, not a table, so it takes **no** `LIB_PRECALC_TABLE` invocation. Its data dependency — the §8.1 `sqtab` table — is already enumerated under §8.1.
 
 ## 13. Network backend ABI
 
@@ -1141,6 +1143,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.10.3 — 2026-08-15
+
+Doc (PATCH): **§8.4 exists now.** [#109](https://github.com/JC-000/c64-lib-contract/issues/109) reported 13 dangling `§8.4` references as a v0.10.1 reorder casualty; ref-verification showed the truth is older and stranger — **the heading never existed at any tag** (structure byte-identical at v0.8.4/v0.10.0/main), while the fleet has cited "§8.4" since v0.7.0: 13 times in this document, 70+ times per adopter repo, and once inside the canonical `precalc_table.inc` itself. The catch-loop clause simply lived unnumbered inside §8.0 and every citation survived on faith. Fix: the block is promoted in place to `### 8.4 Precalc-table enumeration — the catch loop`, making every existing citation correct retroactively; the two in-body "§8.0 catch-loop registry" phrasings in §8.1/§8.2/§8.3 are swept to §8.4; the canonical `precalc_table.inc` is deliberately **unchanged** (its own §8.4 reference self-heals, its "§8.0 catch-loop" header comment is recorded as the historical spelling — zero adopter byte-identity churn). Changelog entries citing §8.0's catch loop stay as written, per the historical-record convention.
 
 ### 0.10.2 — 2026-08-15
 
