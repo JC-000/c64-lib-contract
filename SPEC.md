@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.9.2 (2026-08-15)
+**Version:** 0.10.0 (2026-08-15)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -318,11 +318,58 @@ Archive member basenames are a flat namespace under `ar65` composition and extra
 
 **Rename window (the [#70](https://github.com/JC-000/c64-lib-contract/issues/70) rule).** Any rename of a surface element MUST ship both names for at least one MINOR release, the old form documented as deprecated, before removal at the next MAJOR (or v1.0, whichever comes first). Elements that cannot dual-name (archive members) change only at MAJOR.
 
+**Deprecated-spelling override behavior (v0.10.0).** Two alias shapes shipped in the ZP wave, and **both are window-conformant because both fail loudly**; the trade is recorded so the next rename picks deliberately. *Compatible shape* (`c64-ChaCha20-Poly1305`): the bare name keeps an `.ifndef` guard, so a legacy `-D zp_tmp1=…` still works and moves the canonical slot — but both spellings are independently definable, so a build that defines them divergently could split one slot across two addresses; safe only while nothing does. *Loud-break shape* (`c64-nist-curves`): the bare name is an unguarded alias of the canonical (`zp_tmp1 = nistcurves_zp_tmp1`), so a legacy `-D` of the bare spelling dies at assemble time with `Symbol already defined` — the old override interface breaks, but divergence is structurally impossible. What is **not** conformant is any shape whose failure mode is silent: one slot at two addresses with no diagnostic is the forbidden outcome, in either direction. Consumer-facing rule of thumb from the wave: consumers that assemble the library's own ZP TU are untouched by either shape; consumers that supply slots from their own source must move to canonical spellings (the [c64-wireguard#52](https://github.com/JC-000/c64-wireguard/issues/52) case).
+
 **Suppression gate for colliding old forms ([#88](https://github.com/JC-000/c64-lib-contract/issues/88), v0.9.1).** When the old form is itself a cross-library collision — the #83 ZP names being the motivating case — an ungated dual-name preserves the defect for the whole window: a composed link is no better off the day the window opens than the day before, and §2's registry migration would be blocked by the very rule that schedules it. Therefore: **a dual-named old form that collides across libraries MUST sit behind a consumer-settable suppression define, and the canonical gate for bare-name cases is the existing `LIB_NO_BARE_EXPORTS`** (the §1 precedent — composing consumers already build every library with it, so composed links are collision-free from the day the window opens, while single-library consumers keep the old names untouched).
 
-### 6.6 Consumer footprint asserts — RESERVED
+### 6.6 Consumer footprint asserts (v0.10.0)
 
-The declared-footprint + consumer-assert pattern ([#69](https://github.com/JC-000/c64-lib-contract/issues/69)) enters this chapter one MINOR release after §6.4 is verified in at least two adopters' shipped archives — the #62-before-#69 gate, held from both sides. Reserved here so §6 numbering is stable when it lands.
+**Failure mode this prevents.** A MINOR library bump grows resident code or rodata and the consumer's memory region overflows at link time, with no advance signal that the bump was a spatial event ([#69](https://github.com/JC-000/c64-lib-contract/issues/69), measured twice in `c64-https`: a +512 B validation gate against ~1 byte of region slack, bisected across three tags to find). The ld65 error is loud but late; this clause makes spatial safety checkable *before* a bump, from the manifest alone.
+
+**Why this clause could not exist before v0.9.0.** The assert binds a consumer budget to `LIB_<X>_RESIDENT_BYTES`/`LIB_<X>_COLD_BYTES` — and until §6.4, those described the *library*, not the linked archive. The measured consequence of skipping that gate: `LIB_NISTCURVES_RESIDENT_BYTES` reported 27–28 KB against a 16 KB region for a minimal-variant link that in fact builds and passes its full KAT suite — the assert would have refused a working configuration. §6.4 is now verified in every adopter's shipped archives, so the numbers describe what is linked, and the gate (#62-before-#69, held from both sides) is discharged.
+
+**Library obligations.**
+1. Footprint equates are per-archive (§6.4) and **safe-direction**: each value MUST be ≥ the measured segment sum for that archive, rounded UP (the fleet convention is the next 256-byte boundary — headroom under one page, so incidental growth is absorbed without forcing consumer `.assert` rewrites, and the equate moving is itself the signal that a re-look is due).
+2. `RESIDENT_BYTES` and `COLD_BYTES` are a **pair**: `COLD` is reclaimable-after-init and may legitimately live in a different consumer budget. Release notes MUST state footprint deltas **per (profile × variant)** — a single per-version delta is meaningless when one tag carries several footprint pairs (measured: `c64-x25519` v0.8.0 defined three, selected by profile).
+
+**Consumer pattern** (RECOMMENDED for every linked archive; `lderror` because the operands are imports, §1's guard rule; the area publishes its extent via `define = yes`):
+
+```asm
+; consumer side — one per linked archive, in the consumer's own build
+.import LIB_NISTCURVES_RESIDENT_BYTES
+.import LIB_NISTCURVES_COLD_BYTES
+.import __MAIN_SIZE__                  ; cfg: MAIN: ... define = yes;
+.assert LIB_NISTCURVES_RESIDENT_BYTES + LIB_NISTCURVES_COLD_BYTES <= __MAIN_SIZE__, lderror, "nistcurves declared footprint exceeds the MAIN budget"
+```
+
+Consumers with split budgets assert the pair separately against the regions that hold them. Because the declared value is safe-direction, `declared ≤ budget` implies `actual ≤ budget`; a bump that moves the declared number past the budget fails the link with a named cause instead of an opaque segment-overflow discovered mid-bisect.
+
+### 6.7 Declared non-segment reservations (v0.10.0)
+
+**Failure mode this prevents.** A placement *equate* (not a segment) reserves address space — §8.1's `sqtab` window, §8.2's staging buffers — and **ld65 does not know the region exists**: a memory area spanning the window will happily place growing segments across it, link clean, and corrupt the table at runtime with no diagnostic at any stage ([#78](https://github.com/JC-000/c64-lib-contract/issues/78) item 2; it happened at the previous sqtab base and cost a debugging session). This is the inverse of §6.6's failure: there, the region is declared and the error late-but-loud; here the region is undeclared and there is no error at all. The equate form is *forced* by §8.x — it exists so independently-built adopters agree on one address via `-D` — so the seam between the clause that creates the invisible region and the clause that governs placement is closed here.
+
+**Rule 1 — prefer a segment when nothing forces the equate.** If a single build owns the table (no cross-library placement agreement in play), place it as a segment-resident `.res` buffer: ld65 then enforces non-overlap natively and no guard is needed. The equate form, the declaration, and the assert below exist for the §8.x shared case only.
+
+**Rule 2 — the library guards its own image.** Every library placing an equate-reserved region MUST carry, in a TU that ships in **no** archive (its standalone test/bench driver is the natural home), the three-line guard:
+
+```
+# cfg — the memory area publishes its extent
+MAIN: file = %O, start = %S, size = $D000 - %S, define = yes;
+```
+
+```asm
+; a TU no archive contains
+.import __MAIN_LAST__
+.assert __MAIN_LAST__ <= LIB_SHARED_SQTAB_BASE, lderror, "image overruns the sqtab window (LIB_SHARED_SQTAB_BASE)"
+```
+
+Measured properties (ld65 V2.18, from the [#78 item-2 verification](https://github.com/JC-000/c64-lib-contract/issues/78) and re-verified for this clause): `__MAIN_LAST__` is the first address past the last byte actually *placed*, including the `rw`/`bss` tail — not the area end (the name suggests otherwise; it was checked, not assumed). The boundary is exact — one padding byte past the base trips it. Comparing against the imported equate rather than a re-derived constant means a consumer `-D` relocation moves the guard with it. The guard is free: `define = yes` only publishes symbols, `.assert` emits no code, and the PRG is byte-identical with and without it.
+
+**Two constraints that are part of the rule, not advice:**
+1. **The guard TU MUST NOT ship in any archive** — an `.import __MAIN_LAST__` inside an archive member would force every consumer to name a memory area `MAIN` with `define = yes` or eat an unresolved external. The guard therefore protects the *library's own image only*; a consumer authors their own memory map, so consumers SHOULD mirror the same assert against their own `__<AREA>_LAST__` for every equate-placed reservation of every library they link.
+2. **The import MUST NOT be weak or optional.** An `lderror` assert whose operand is missing degrades to `Warning: Cannot evaluate assertion` — a silent no-op. The pattern is safe only because the unresolved external is itself a hard link error; weaken the import and the guard silently stops guarding.
+
+**Verified scope.** The `__*_LAST__` behavior above is measured on ld65 V2.18 with a single file-emitting memory area whose top segment is `bss`. Load/run splits, multiple areas, and overlays are unverified — an adopter with those shapes MUST re-measure before relying on the guard, and should report the result to this clause.
 
 ## 7. Semver expectations
 
@@ -885,6 +932,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.10.0 — 2026-08-15
+
+Normative (MINOR — the [#76](https://github.com/JC-000/c64-lib-contract/issues/76) restructuring, phase 2). **§6.6 lands** ([#69](https://github.com/JC-000/c64-lib-contract/issues/69)): consumer footprint asserts against the per-archive §6.4 manifest — library obligations (safe-direction round-up values; RESIDENT/COLD as a pair; release-note deltas per profile × variant, since one tag carries several footprint pairs) plus the consumer pattern against `__<AREA>_SIZE__` under `define = yes`. The #62-before-#69 gate is discharged: §6.4 is verified in all four adopters' shipped archives, so the assert binds to the linked artifact — the 27 KB-declared-vs-16 KB-region false-refusal that blocked this clause pre-#62 is impossible by construction. **§6.7 added** ([#78](https://github.com/JC-000/c64-lib-contract/issues/78) item 2): declared non-segment reservations — prefer segment-resident buffers where nothing forces the equate; where §8.x placement equates reserve address space invisible to ld65, the library MUST carry the three-line `__MAIN_LAST__` guard in a never-archived TU, with the two hard constraints (guard TU in no archive; import never weak — a missing operand degrades `lderror` to a silent warning) and the verified-scope statement (ld65 V2.18, single area, `bss`-top; other shapes MUST re-measure). Consumers mirror both patterns against their own maps. **§6.5 gains the deprecated-spelling override note**: both wave alias shapes (chacha compatible-with-divergence-risk, nist loud-break) are window-conformant because both fail loudly; silent slot-splitting is the forbidden outcome; the supplies-own-slots vs assembles-library-TU consumer split recorded. All snippets assemble/link-tested both directions this session (clean link passes both guards; a BSS pad trips §6.7's; an oversized declared footprint trips §6.6's; ca65/ld65 V2.18). Sources: #69's measured c64-https evidence + the profile-pairs refinement, #78 item 2's proven remedy with its measured properties, x25519's wave-measured per-switch deltas, chacha's round-up precedent, nist#107/chacha#78's alias shapes.
 
 ### 0.9.2 — 2026-08-15
 
