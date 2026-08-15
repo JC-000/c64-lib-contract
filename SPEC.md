@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.10.1 (2026-08-15)
+**Version:** 0.10.2 (2026-08-15)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -1141,6 +1141,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.10.2 — 2026-08-15
+
+Doc (PATCH): **§6.7's prose contradicted §8.1's export discipline** — it said the guard compares "against the imported equate," but `LIB_SHARED_SQTAB_BASE` is one §8.1 forbids anyone from exporting (measured: the import fails as an unresolved external; the wording was carried from before the v0.9.1 canonical-≠-exported ruling). Found in [#105](https://github.com/JC-000/c64-lib-contract/issues/105) by the first §6.7 adoption ([chacha#81](https://github.com/JC-000/c64-ChaCha20-Poly1305/pull/81)) — the copy-paste-facing kind, since the code block was correct but the prose sent an adopter reconciling the two to `.import`. Corrected: the base is obtained **source-level** via the same `.ifndef`-guarded header the placing TU uses, with the **single-shared-include** rule (two copies of the default can silently disagree, leaving the guard checking a different window than the table occupies) and the relocation mechanism restated (`-D` reaches placing TU and guard together — re-measured both directions). Two adoption measurements folded in: boundary exactness is bounded by the primitive's own alignment rule (page-aligned base ⇒ page-granular observation), and constraint 3 added — **prove the guard fires in the configuration that actually places the table**, since a profile-gated guard skipped by the non-placing profile passes a firing test while verifying nothing. Eighth member of the copy-paste defect class.
 
 ### 0.10.1 — 2026-08-15
 
