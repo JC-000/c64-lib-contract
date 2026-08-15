@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.10.3 (2026-08-15)
+**Version:** 0.10.4 (2026-08-15)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -308,6 +308,8 @@ Every configuration this contract contemplates — each §8.0 ownership state, e
 One named convenience target is REQUIRED of every library that consumes any §8.x primitive: `make lib-app-owned`, building `build/lib/<shortname>-app-owned.a` — the `lib` member set assembled with **all** of the library's applicable §8.x deferral switches defined. Which switches a library can defer is library-specific knowledge; the target encapsulates it so a consumer can request §8.0's `APP_OWNED` shape without knowing the switch list. Per §8.0's conditional-mask rule the resulting manifest attests the deferral (`LIB_<X>_SHARED_PRIMITIVES` drops the deferred bits; `LIB_<X>_SHARED_CONSUMES` keeps them).
 
 No further target matrix is required or wanted — finer combinations ride `CONTRACT_DEFINES` on existing targets, and every additional target name enlarges the §6.5 surface #70 must then freeze.
+
+**Scope of that posture (v0.10.4).** It governs *define-reachable* combinations. An axis that changes an archive's **member set** — a profile whose objects differ, not merely their assembly configuration — cannot ride §6.2 defines (a `-D` reconfigures TUs; it cannot add an object to an archive), and member surgery is banned outright (§6.1). So when a *documented* axis is member-set-shaped, this clause's MUST decides it: the axis takes a §6.1 target, carrying its own §6.4 manifest TUs assembled under that configuration and gated on its switches. The frozen §6.5 name is the accepted cost of reachability, not a reason to leave the axis surgery-only. Motivating case: [nist#117](https://github.com/JC-000/c64-nist-curves/issues/117) — the P-256 comb verify set existed only inside the full `lib-onchip` archive, so the library's fastest documented verify configuration was reachable only through staged `rm`-of-members rebuilds consumer-side, and the retained full-set manifest (legitimately describing the pre-surgery archive) forced the consumer to exempt that profile from its §6.6 assert — the clause chain §6.1→§6.4→§6.6 breaking at the first link.
 
 ### 6.4 The manifest describes the archive it ships in
 
@@ -1143,6 +1145,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.10.4 — 2026-08-15
+
+Doc/clarification (PATCH): **§6.3's no-further-matrix posture is scoped to define-reachable combinations.** [nist#117](https://github.com/JC-000/c64-nist-curves/issues/117) (filed from the c64-https side, [c64-https#119](https://github.com/JC-000/c64-https/issues/119)) surfaced an axis shape the sentence did not adjudicate: the P-256 comb verify set differs from the shipped `lib-p256-verify-onchip` by *member set* (`ecdsa256.o` without `-D ECDSA_NO_COMB`, plus `points256_comb.o`/`data_p256_limlee.o`), which no §6.2 define can produce — so the sentence discouraging new targets and the ¶1 MUST requiring reachability pulled in opposite directions, and the measured consumer resolution was the worst one: staged member surgery (§6.1-banned) whose retained full-set manifest forced a §6.6 assert exemption. The clarification states the precedence that was already derivable: documented member-set axes take a §6.1 target with per-configuration §6.4 manifest TUs; the enlarged §6.5 freeze surface is the accepted cost. No obligation changes for any existing archive — the four adopters' current target sets are untouched.
 
 ### 0.10.3 — 2026-08-15
 
