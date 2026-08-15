@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.10.1 (2026-08-15)
+**Version:** 0.10.2 (2026-08-15)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -373,11 +373,14 @@ MAIN: file = %O, start = %S, size = $D000 - %S, define = yes;
 .assert __MAIN_LAST__ <= LIB_SHARED_SQTAB_BASE, lderror, "image overruns the sqtab window (LIB_SHARED_SQTAB_BASE)"
 ```
 
-Measured properties (ld65 V2.18, from the [#78 item-2 verification](https://github.com/JC-000/c64-lib-contract/issues/78) and re-verified for this clause): `__MAIN_LAST__` is the first address past the last byte actually *placed*, including the `rw`/`bss` tail — not the area end (the name suggests otherwise; it was checked, not assumed). The boundary is exact — one padding byte past the base trips it. Comparing against the imported equate rather than a re-derived constant means a consumer `-D` relocation moves the guard with it. The guard is free: `define = yes` only publishes symbols, `.assert` emits no code, and the PRG is byte-identical with and without it.
+**Where the guard gets the base (v0.10.2, correcting v0.10.0):** the equate is obtained **source-level** — the guard TU includes the same `.ifndef`-guarded header the placing TU uses — **never by `.import`**, which §8.1's export discipline forecloses (measured: `.import LIB_SHARED_SQTAB_BASE` fails as an unresolved external, exactly as §8.1 implies; the v0.10.0 prose here said "imported equate", a contradiction carried from before the v0.9.1 canonical-≠-exported ruling — [#105](https://github.com/JC-000/c64-lib-contract/issues/105)). The `.ifndef` is what preserves relocation: `-D` defines the symbol for the whole assembly, so the placing TU and the guard see the same override and move together (re-measured for this correction: a relocated base inside the image fires the guard; outside, it passes). **The default MUST live in exactly one shared include** — two independent copies of the `.ifndef` default can silently disagree, and the guard then checks a different window than the table occupies: trustworthy, not merely present, requires single-source.
+
+Measured properties (ld65 V2.18, from the [#78 item-2 verification](https://github.com/JC-000/c64-lib-contract/issues/78) and re-verified for this clause): `__MAIN_LAST__` is the first address past the last byte actually *placed*, including the `rw`/`bss` tail — not the area end (the name suggests otherwise; it was checked, not assumed). The boundary is exact to the byte where the primitive's own rules allow it to be observed — a primitive whose base must be page-aligned (§8.1) bounds the observable granularity to the page, since a non-aligned probe fails the alignment assert first ([chacha's §6.7 adoption](https://github.com/JC-000/c64-ChaCha20-Poly1305/pull/81) measured page-exact: last byte `$4D27`, base `$4E00` passes, `$4D00` fires). The guard is free: `define = yes` only publishes symbols, `.assert` emits no code, and the PRG is byte-identical with and without it.
 
 **Two constraints that are part of the rule, not advice:**
 1. **The guard TU MUST NOT ship in any archive** — an `.import __MAIN_LAST__` inside an archive member would force every consumer to name a memory area `MAIN` with `define = yes` or eat an unresolved external. The guard therefore protects the *library's own image only*; a consumer authors their own memory map, so consumers SHOULD mirror the same assert against their own `__<AREA>_LAST__` for every equate-placed reservation of every library they link.
 2. **The import MUST NOT be weak or optional.** An `lderror` assert whose operand is missing degrades to `Warning: Cannot evaluate assertion` — a silent no-op. The pattern is safe only because the unresolved external is itself a hard link error; weaken the import and the guard silently stops guarding.
+3. **Prove the guard fires in the configuration that actually places the table (v0.10.2).** A profile-gated guard in a build whose profile emits no table is *correctly skipped* — a firing test against that build passes and has verified nothing. Second silent-no-op mode, different mechanism from constraint 2, same outcome; measured during [chacha's adoption](https://github.com/JC-000/c64-lib-contract/issues/105), whose first firing test "passed" against the profile that places nothing. The acceptance test for adopting this clause is a deliberate overrun that *fires*, in the placing configuration.
 
 **Verified scope.** The `__*_LAST__` behavior above is measured on ld65 V2.18 with a single file-emitting memory area whose top segment is `bss`. Load/run splits, multiple areas, and overlays are unverified — an adopter with those shapes MUST re-measure before relying on the guard, and should report the result to this clause.
 
@@ -386,7 +389,7 @@ Measured properties (ld65 V2.18, from the [#78 item-2 verification](https://gith
 - **MAJOR** — bumped on any breaking change to the exported surface (removed/renamed symbols, changed calling conventions, changed memory model, changed semver of a manifest equate).
 - **MINOR** — bumped on additive changes (new symbols, new build targets, new manifest equates, new variants).
 - **PATCH** — bug fix only, no ABI surface change.
-- **`LIB_<X>_ABI_VERSION`** is **not** derived from MAJOR. It is an independent generation counter for the exported surface, starting at 1 and incremented on any breaking export change (§1). Consumer-side `.if LIB_<X>_ABI_VERSION <> <expected>` is the load-bearing breakage gate — and it is load-bearing *because* of the next paragraph: pre-1.0 breakage rides MINOR bumps, so MAJOR cannot carry the signal.
+- **`LIB_<X>_ABI_VERSION`** is **not** derived from MAJOR. It is an independent generation counter for the exported surface, starting at 1 and incremented on any breaking export change (§1). The consumer-side gate `.assert LIB_<X>_ABI_VERSION = <expected>, lderror, "..."` is the load-bearing breakage check — `.assert`/`lderror`, never `.if`/`.error`, for the reason §1's guard rule states: the operand is an import with no value until link, and `.if` on it fails with `Constant expression expected` (this bullet carried the broken `.if` form from v0.7.5 until [#107](https://github.com/JC-000/c64-lib-contract/issues/107); v0.8.1 fixed §1's snippets and missed this restatement). It is load-bearing *because* of the next paragraph: pre-1.0 breakage rides MINOR bumps, so MAJOR cannot carry the signal.
 
 While the contract is in v0.x (pre-1.0), breaking changes happen freely with MINOR bumps. Once v1.0 ships, breaking changes go through a one-MINOR-release deprecation cycle.
 
@@ -484,7 +487,7 @@ For the purposes of both masks, **exporting a primitive's canonical body or init
 The consumes mask is derived from the same switches that already drive the conditional ownership mask — the profile/config gates drop bits from both masks, while the `SHARED_*` deferral switches drop bits from the ownership mask only:
 
 ```asm
-.if ::X25519_ONCHIP_MUL          ; profile gate: drops the bit from BOTH masks
+.ifdef X25519_ONCHIP_MUL         ; profile gate: drops the bit from BOTH masks
   _USE_REU_MUL = 0
 .else
   _USE_REU_MUL = LIB_SHARED_PRIMITIVES_REU_MUL
@@ -1138,6 +1141,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.10.2 — 2026-08-15
+
+Doc (PATCH): **§6.7's prose contradicted §8.1's export discipline** — it said the guard compares "against the imported equate," but `LIB_SHARED_SQTAB_BASE` is one §8.1 forbids anyone from exporting (measured: the import fails as an unresolved external; the wording was carried from before the v0.9.1 canonical-≠-exported ruling). Found in [#105](https://github.com/JC-000/c64-lib-contract/issues/105) by the first §6.7 adoption ([chacha#81](https://github.com/JC-000/c64-ChaCha20-Poly1305/pull/81)) — the copy-paste-facing kind, since the code block was correct but the prose sent an adopter reconciling the two to `.import`. Corrected: the base is obtained **source-level** via the same `.ifndef`-guarded header the placing TU uses, with the **single-shared-include** rule (two copies of the default can silently disagree, leaving the guard checking a different window than the table occupies) and the relocation mechanism restated (`-D` reaches placing TU and guard together — re-measured both directions). Two adoption measurements folded in: boundary exactness is bounded by the primitive's own alignment rule (page-aligned base ⇒ page-granular observation), and constraint 3 added — **prove the guard fires in the configuration that actually places the table**, since a profile-gated guard skipped by the non-placing profile passes a firing test while verifying nothing. Eighth member of the copy-paste defect class — and members nine and ten ride along from [#107](https://github.com/JC-000/c64-lib-contract/issues/107), both found by the c64-https v0.10.0 alignment, both in clauses predating the run-every-snippet practice: **§7's ABI-gate bullet restated the `.if`-on-import form** that v0.8.1 had fixed in §1 (fixed to `.assert`/`lderror` with the §1 cross-reference), and **§8.0's consumes-mask snippet used `.if ::` on an unset `-D` selector**, which fails to assemble in the adopter's own default build (fixed to `.ifdef`, matching the adjacent ownership-mask snippet — the asymmetry read as deliberate and was not). Both replacements reproduced and both-directions-tested (ca65 V2.18). The #107 suggestion of a full fenced-block assembly sweep wired into `make verify` is accepted as follow-up tooling.
 
 ### 0.10.1 — 2026-08-15
 
