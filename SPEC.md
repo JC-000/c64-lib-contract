@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.9.1 (2026-08-15)
+**Version:** 0.9.2 (2026-08-15)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -102,9 +102,9 @@ Every library that claims any ZP slots MUST publish them as `.exportzp`-ed equat
 | `fp_` `ec_` `sha_` `nistcurves_` | `c64-nist-curves` |
 | `fe25519_` `fe_` `x25_` `mul_` `sqr_` `x25519_` | `c64-x25519` |
 | `polyval_` `pv_` | `c64-polyval` |
-| `cc20_` `poly_` `w32_` `ct_` `chacha_` | `c64-ChaCha20-Poly1305` |
+| `cc20_` `poly_` `w32_` `ct_` `chacha_` `chacha20poly1305_` | `c64-ChaCha20-Poly1305` |
 
-General-purpose scratch takes `<shortname>_zp_<role>` (e.g., `nistcurves_zp_tmp1`). Known migration items, riding the §6.5 rename window **with its suppression gate** (deprecated bare slot names sit behind `LIB_NO_BARE_EXPORTS`, per §6.5/#88 — an ungated bare alias would preserve the #83 collision for the window's whole duration): `c64-nist-curves`' live bare `zp_tmp1`/`zp_tmp2`/`zp_ptr1`/`zp_ptr2`; `c64-x25519`'s `poly_carry` (a `mul_8x8` carry byte, colliding with the `poly_` registration) renames into its `mul_` family; `c64-ChaCha20-Poly1305`'s bare `.importzp` names move in the same window.
+Every library's §6.1 `<shortname>_` is registered to it by construction (v0.9.2 — the general-scratch rule below implied this; the table now states it, closing the gap the first `chacha20poly1305_zp_*` migration exposed in [chacha#78](https://github.com/JC-000/c64-ChaCha20-Poly1305/pull/78)). General-purpose scratch takes `<shortname>_zp_<role>` (e.g., `nistcurves_zp_tmp1`). Known migration items, riding the §6.5 rename window **with its suppression gate** (deprecated bare slot names sit behind `LIB_NO_BARE_EXPORTS`, per §6.5/#88 — an ungated bare alias would preserve the #83 collision for the window's whole duration): `c64-nist-curves`' live bare `zp_tmp1`/`zp_tmp2`/`zp_ptr1`/`zp_ptr2`; `c64-x25519`'s `poly_carry` (a `mul_8x8` carry byte, colliding with the `poly_` registration) renames into its `mul_` family; `c64-ChaCha20-Poly1305`'s bare `.importzp` names move in the same window.
 
 **Pattern:**
 
@@ -801,7 +801,9 @@ Libraries that ship adjacent caches keyed off the canonical table — e.g., `c64
 
 **Migration shape.** Each adopting library MAY keep its existing per-lib `reu_mul_init` exported for backwards compatibility. Under `.ifdef SHARED_REU_MUL_INIT`, the library's own un-doubled-banks init body is gated out and the canonical `reu_mul_tables_init` takes over. Library-private init for adjacent caches (above) stays under its own build-time gate and is invoked alongside the canonical init from the library's existing entry. A consumer flips libraries to the shared init one at a time without an atomic cross-repo cutover.
 
-**Fetch deferral (v0.9.1, correcting v0.9.0).** `SHARED_REU_MUL_INIT` gates init only; the per-row fetch was exported unconditionally by both REU adopters, so every composed link carried two canonical fetches regardless of init deferral. A second switch, **`SHARED_REU_MUL_FETCH`**, gates the fetch surface — which is exactly two symbols: **`reu_fetch_mul_row`** and the SMC bank-patch label **`reu_fetch_mul_row_bank_patch`** (promoted here from the #15 delegation mechanism; adjacent-cache fetches like `reu_fetch_doubled_row` delegate their first DMA through it, so deferral under `SQR_DMA_K > 0` requires the provider to export it). The §8.1 import-never-stub rule applies: a deferring build MUST `.import` both from the provider.
+**Fetch deferral (v0.9.1, correcting v0.9.0; conditional surface refined v0.9.2).** `SHARED_REU_MUL_INIT` gates init only; the per-row fetch was exported unconditionally by both REU adopters, so every composed link carried two canonical fetches regardless of init deferral. A second switch, **`SHARED_REU_MUL_FETCH`**, gates the fetch surface: **`reu_fetch_mul_row`** always, and the SMC bank-patch label **`reu_fetch_mul_row_bank_patch`** *conditionally* (promoted from the #15 delegation mechanism). The patch label is required of a provider **iff its fetch body carries the SMC bank-patch site**; a provider whose fetch computes the bank inline (`c64-nist-curves`' shape — no SMC site, no callers) exports nothing and MUST NOT synthesize one. A deferring build MUST `.import` the patch label **iff its own adjacent-cache paths delegate through it** (`c64-x25519`'s `SQR_DMA_K > 0` shape). The unsupported pairing — a patch-needing deferrer composed against an inline-computing provider — fails as an unresolved external at link; that is the intended, loud outcome, and this sentence is its documentation.
+
+**Import-never-stub, stated precisely (v0.9.2).** The load-bearing half of the rule is that a deferring build MUST NOT export a body under a canonical name — no second canonical definition, ever. The `.import` half applies only where the deferring build itself *references* the symbol; an import ca65 drops as unreferenced is conformant (measured in [nist#106](https://github.com/JC-000/c64-nist-curves/pull/106): a deferring build whose own code never calls the fetch has nothing observable to import, and the rule is satisfied by the absent stub alone).
 
 The v0.9.0 text also gated `mul_dma_lo`/`mul_dma_hi`, `mul_cached_a` and `mul_src2_buf`; that was an overreach — those are adopter-private buffers (in `c64-x25519`, `mul_src2_buf` is the fe25519 operand-copy buffer the fetch never touches, and `mul_cached_a` is dual-purpose scratch), and deferring them would point a library's own field arithmetic at another library's memory. Staging *placement* is already the job of the unexported `LIB_SHARED_REU_MUL_STAGE_LO`/`_HI` input equates. The four bare labels instead move to the **rename track**: `mul_` is registered to `c64-x25519` in the §2 registry, so `c64-nist-curves`' `mul_dma_*`/`mul_cached_a`/`mul_src2_buf` take its own prefix under the §6.5 window (suppression-gated per #88), and x25519's remain under its registration.
 
@@ -883,6 +885,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.9.2 — 2026-08-15
+
+Doc/clarification (PATCH), three items from wave implementations. **§2**: every library's §6.1 `<shortname>_` prefix is registered by construction — the table now lists `chacha20poly1305_` explicitly (gap exposed by the first `<shortname>_zp_*` migration, [chacha#78](https://github.com/JC-000/c64-ChaCha20-Poly1305/pull/78)). **§8.2**: `reu_fetch_mul_row_bank_patch` is *conditionally* required — providers export it iff their fetch carries the SMC site (inline-computing providers MUST NOT synthesize one); deferrers import it iff their adjacent caches delegate through it; the unsupported pairing fails loudly as an unresolved external, documented as intended ([nist#106](https://github.com/JC-000/c64-nist-curves/pull/106)'s question). **§8.2**: import-never-stub stated precisely — the load-bearing half is no-second-canonical-definition; imports only where referenced, and an import dropped as unreferenced is conformant. Also recorded from nist#106 for the fleet: a `$(subst)`-built member list defeated `check_archives.py`'s assignment parser, so the ratchet silently inspected the wrong object set until value pins caught it — archive-inspection tooling MUST read explicit member lists or the built archive itself, never make-expressions it cannot expand.
 
 ### 0.9.1 — 2026-08-15
 
