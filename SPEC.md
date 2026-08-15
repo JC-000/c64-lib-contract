@@ -104,7 +104,7 @@ Every library that claims any ZP slots MUST publish them as `.exportzp`-ed equat
 | `polyval_` `pv_` | `c64-polyval` |
 | `cc20_` `poly_` `w32_` `ct_` `chacha_` | `c64-ChaCha20-Poly1305` |
 
-General-purpose scratch takes `<shortname>_zp_<role>` (e.g., `nistcurves_zp_tmp1`). Known migration items, riding the §6.5 rename window: `c64-nist-curves`' live bare `zp_tmp1`/`zp_tmp2`/`zp_ptr1`/`zp_ptr2` (#83); `c64-x25519`'s `poly_carry` (a `mul_8x8` carry byte, colliding with the `poly_` registration) renames into its `mul_` family; `c64-ChaCha20-Poly1305`'s bare `.importzp` names move in the same window.
+General-purpose scratch takes `<shortname>_zp_<role>` (e.g., `nistcurves_zp_tmp1`). Known migration items, riding the §6.5 rename window **with its suppression gate** (deprecated bare slot names sit behind `LIB_NO_BARE_EXPORTS`, per §6.5/#88 — an ungated bare alias would preserve the #83 collision for the window's whole duration): `c64-nist-curves`' live bare `zp_tmp1`/`zp_tmp2`/`zp_ptr1`/`zp_ptr2`; `c64-x25519`'s `poly_carry` (a `mul_8x8` carry byte, colliding with the `poly_` registration) renames into its `mul_` family; `c64-ChaCha20-Poly1305`'s bare `.importzp` names move in the same window.
 
 **Pattern:**
 
@@ -315,6 +315,8 @@ The following are contract surface, subject to §7 semver and the rename window 
 Archive member basenames are a flat namespace under `ar65` composition and extraction tooling — today `lib_version.o` and `lib_manifest.o` ship in all four adopters, `zp_config.o` in three. At each library's next MAJOR, member basenames MUST take the `<shortname>_` prefix (`x25519_lib_version.o`). Members cannot carry two names at once, which is why this rides MAJOR rather than a window.
 
 **Rename window (the [#70](https://github.com/JC-000/c64-lib-contract/issues/70) rule).** Any rename of a surface element MUST ship both names for at least one MINOR release, the old form documented as deprecated, before removal at the next MAJOR (or v1.0, whichever comes first). Elements that cannot dual-name (archive members) change only at MAJOR.
+
+**Suppression gate for colliding old forms ([#88](https://github.com/JC-000/c64-lib-contract/issues/88)).** When the old form is itself a cross-library collision — the #83 ZP names being the motivating case — an ungated dual-name preserves the defect for the whole window: a composed link is no better off the day the window opens than the day before, and §2's registry migration would be blocked by the very rule that schedules it. Therefore: **a dual-named old form that collides across libraries MUST sit behind a consumer-settable suppression define, and the canonical gate for bare-name cases is the existing `LIB_NO_BARE_EXPORTS`** (the §1 precedent — composing consumers already build every library with it, so composed links are collision-free from the day the window opens, while single-library consumers keep the old names untouched).
 
 ### 6.6 Consumer footprint asserts — RESERVED
 
@@ -757,10 +759,16 @@ Page alignment and adjacent placement of the two stage buffers are required by t
 What a §8.2-consuming library MUST export instead is its library-prefixed *output* counterparts of the three placement equates, so a consumer can verify that co-linked libraries agree on placement:
 
 ```asm
-; library side — in the TU that consumes the §8.2 knobs
-LIB_<X>_SHARED_REU_MUL_BANK       = LIB_SHARED_REU_MUL_BANK
-LIB_<X>_SHARED_REU_MUL_OFFSET     = LIB_SHARED_REU_MUL_OFFSET
-LIB_<X>_SHARED_REU_MUL_BANKS_USED = LIB_SHARED_REU_MUL_BANKS_USED
+; library side — in the TU that consumes the §8.2 knobs.
+; Alias the symbol the REU access paths actually READ. If the code reads the
+; knob directly, that is the knob; if it reads a §3 alias of the knob
+; (e.g. LIB_<X>_REU_BANK_MUL), alias THAT — aliasing the knob would publish a
+; stale value whenever a consumer overrides the §3 alias directly, the exact
+; decorative-export defect this clause bans (both override spellings must
+; track: measured in c64-nist-curves#105).
+LIB_<X>_SHARED_REU_MUL_BANK       = <the bank symbol the code reads>
+LIB_<X>_SHARED_REU_MUL_OFFSET     = <the offset symbol the code reads>
+LIB_<X>_SHARED_REU_MUL_BANKS_USED = (1 .shl LIB_<X>_SHARED_REU_MUL_BANK) | (1 .shl (LIB_<X>_SHARED_REU_MUL_BANK + 1))
 .export LIB_<X>_SHARED_REU_MUL_BANK:       abs
 .export LIB_<X>_SHARED_REU_MUL_OFFSET:     abs
 .export LIB_<X>_SHARED_REU_MUL_BANKS_USED: abs
@@ -870,7 +878,7 @@ See [consumers.md](consumers.md) for the list of consumer projects relying on th
 
 ### 0.9.0 — 2026-08-14
 
-Normative (MINOR — the [#76](https://github.com/JC-000/c64-lib-contract/issues/76) restructuring, phase 1). **§6 becomes the build-and-consume chapter**, growing from 11 lines to six clauses; obligations now attach to *archives*, not "the library". New: §6.2 defines-forwarding with the contract-normative `CONTRACT_DEFINES` (global) / `CONTRACT_ZP_DEFINES` (ZP-defining-TU-scoped) pair — the split is measured, not stylistic: a globally-delivered slot override collides with every `.importzp` site, and a single-variable implementation passes the library's own CI while breaking the first consumer override ([nist#104](https://github.com/JC-000/c64-nist-curves/pull/104)). §6.3 reachability + required `lib-app-owned` target (encapsulating library-specific deferral-switch knowledge). §6.4 per-variant manifest rule from #62, both halves stated per-TU with the two measured single-half failures. §6.5 the name-surface enumeration incl. archive member basenames (`<shortname>_` prefix at next MAJOR) and the #70 rename window. §6.6 reserved for #69 per the #62-before-#69 gate. **§2 gains the ZP prefix registry** (#83): per-library prefix table checked at intake, same-name-across-libraries always a defect unless §8.x-canonical, general scratch takes `<shortname>_zp_<role>`. **§8.1/§8.2/§8.3 deferral completion**: import-never-stub rule; `SHARED_REU_MUL_FETCH` switch closing the both-adopters-always-own-the-fetch gap; `sqtab_lo`/`sqtab_hi` canonical over `sqr_*`. Archive basenames standardize on `<shortname>[-<variant>].a` under the window. Consolidates #62/#70/#72 (spec side) and the #82/#83 structural remainders; #69 explicitly deferred. Adopter-verified inputs: nist#104 (A.1 two-variable + pattern-rule caveat), chacha#75 (`lib-app-owned` precedent), the four R2 ZP audits, and the item-B surface table + addenda on #76.
+Normative (MINOR — the [#76](https://github.com/JC-000/c64-lib-contract/issues/76) restructuring, phase 1). **§6 becomes the build-and-consume chapter**, growing from 11 lines to six clauses; obligations now attach to *archives*, not "the library". New: §6.2 defines-forwarding with the contract-normative `CONTRACT_DEFINES` (global) / `CONTRACT_ZP_DEFINES` (ZP-defining-TU-scoped) pair — the split is measured, not stylistic: a globally-delivered slot override collides with every `.importzp` site, and a single-variable implementation passes the library's own CI while breaking the first consumer override ([nist#104](https://github.com/JC-000/c64-nist-curves/pull/104)). §6.3 reachability + required `lib-app-owned` target (encapsulating library-specific deferral-switch knowledge). §6.4 per-variant manifest rule from #62, both halves stated per-TU with the two measured single-half failures. §6.5 the name-surface enumeration incl. archive member basenames (`<shortname>_` prefix at next MAJOR) and the #70 rename window. §6.6 reserved for #69 per the #62-before-#69 gate. **§2 gains the ZP prefix registry** (#83): per-library prefix table checked at intake, same-name-across-libraries always a defect unless §8.x-canonical, general scratch takes `<shortname>_zp_<role>`. **§8.1/§8.2/§8.3 deferral completion**: import-never-stub rule; `SHARED_REU_MUL_FETCH` switch closing the both-adopters-always-own-the-fetch gap; `sqtab_lo`/`sqtab_hi` canonical over `sqr_*`. Archive basenames standardize on `<shortname>[-<variant>].a` under the window. Consolidates #62/#70/#72 (spec side) and the #82/#83 structural remainders; #69 explicitly deferred. Adopter-verified inputs: nist#104 (A.1 two-variable + pattern-rule caveat), chacha#75 (`lib-app-owned` precedent), the four R2 ZP audits, and the item-B surface table + addenda on #76. Two review amendments before merge: §6.5 gains the **suppression gate for colliding old forms** ([#88](https://github.com/JC-000/c64-lib-contract/issues/88) — an ungated dual-name would preserve the #83 collision for the window's whole duration; `LIB_NO_BARE_EXPORTS` is the canonical gate, §1 precedent), and the §8.2 export-discipline example now aliases **the symbol the code reads** rather than the knob (the v0.8.5 snippet contradicted its own normative sentence for libraries whose access paths read a §3 alias — found and measured in [c64-nist-curves#105](https://github.com/JC-000/c64-nist-curves/pull/105), both override spellings verified).
 
 ### 0.8.6 — 2026-08-14
 
