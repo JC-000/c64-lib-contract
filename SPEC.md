@@ -279,6 +279,8 @@ Two contract-normative make variables, both defaulting empty. The split is load-
 
 A §2 slot override delivered globally collides with every `.importzp` site — `Error: Symbol '<slot>' is already defined` (measured). The failure shape is silent until the first consumer override, because the library's own build defines nothing; a single-variable implementation passes its own CI and breaks in the consumer's hands. If the ZP-defining TU is built by a generic pattern rule, it needs an explicit rule to receive the scoped variable at all (measured in the first adopter implementation, [c64-nist-curves#104](https://github.com/JC-000/c64-nist-curves/pull/104)).
 
+**The set of ZP-defining TUs is a per-library fact, and the delivery scope follows it**, not the other way around: one TU (import-based models — the collision warning above), *every* TU (bake-everywhere models where each member defines its slots via `.ifndef`-guarded includes — there, global delivery of `CONTRACT_ZP_DEFINES` **is** the scoped delivery, and narrowing it to one object produces an exported override alongside stale baked defaults, a silent mismatch; measured reading from [c64-polyval#34](https://github.com/JC-000/c64-polyval/pull/34)), or zero archive TUs (the consumer-assembled model below, which needs no scoped variable at all).
+
 Values MUST be `$`-free — `0x` hex or decimal, per §2's `$`-hex quoting note:
 
 ```sh
