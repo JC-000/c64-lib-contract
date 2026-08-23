@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.10.7 (2026-08-22)
+**Version:** 0.11.0 (2026-08-22)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -332,6 +332,10 @@ Manifest equate *names* stay per-library (`LIB_<X>_RESIDENT_BYTES`); variant ide
 The following are contract surface, subject to §7 semver and the rename window below: exported symbols and their `LIB_<X>_` families; §2 ZP slot names (registry in §2); §4 segment names; archive basenames (§6.1); **archive member basenames**; make target names (§6.1); the §6.2 variables and every define family they forward.
 
 Archive member basenames are a flat namespace under `ar65` composition and extraction tooling — today `lib_version.o` and `lib_manifest.o` ship unprefixed in four adopters, `zp_config.o` in three. At each library's next MAJOR, member basenames MUST take the `<shortname>_` prefix (`x25519_lib_version.o`). Members cannot carry two names at once, which is why this rides MAJOR rather than a window.
+
+**A library onboarding with no released consumers SHOULD be born prefixed (v0.11.0).** The MAJOR deferral above is a concession to installed base, not a judgement that unprefixed members are acceptable: an established library cannot rename a member without breaking whoever extracts it, so it waits. A library that nobody has linked yet pays none of that cost, and there is no reason for it to join a namespace pile-up it would immediately begin waiting to leave. The window exists to be escaped; a new adopter should simply start on the far side of it.
+
+Scope: "no released consumers" means no tagged release that any consumer pins, which is checkable from the library's own tags and this repo's `consumers.md` rather than being a matter of assertion. A library that has cut a release someone links falls back to the MAJOR rule. `c64-mlkem` is the first library to take this path — it ships `mlkem_lib_version.o` / `mlkem_lib_manifest.o` from its first archive — which is why the count above is four rather than five.
 
 **Rename window (the [#70](https://github.com/JC-000/c64-lib-contract/issues/70) rule).** Any rename of a surface element MUST ship both names for at least one MINOR release, the old form documented as deprecated, before removal at the next MAJOR (or v1.0, whichever comes first). Elements that cannot dual-name (archive members) change only at MAJOR.
 
@@ -1152,6 +1156,16 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.11.0 — 2026-08-22
+
+Normative (MINOR): **§6.5 gains a zero-consumer carve-out for archive member basenames.** The clause defers the `<shortname>_` prefix to each library's next MAJOR, and the reasoning is entirely about installed base — a member cannot carry two names at once, so a library someone already extracts from has to wait for a breaking release to rename. That reasoning does not reach a library nobody has linked yet, and the clause previously had no rule for one: it would have joined the unprefixed pile-up on day one and immediately started waiting for its own MAJOR to leave it. §6.5 now says such a library SHOULD be born prefixed instead.
+
+Classified MINOR rather than PATCH because this is new normative text — an RFC-2119 `SHOULD` in a clause that previously carried only the MAJOR-deferral `MUST`, governing a class of libraries that had no rule at all. It is not the "zero normative change" that v0.10.1 sets as the PATCH line, even though it is additive and relaxes nothing for any existing adopter. Surfaced during the [#123](https://github.com/JC-000/c64-lib-contract/pull/123) intake review, where it was initially folded into that registry PATCH and split out for exactly this reason.
+
+The scope test is deliberately checkable rather than asserted: "no released consumers" means no tagged release that any consumer pins, verifiable from the library's own tags and `consumers.md`. A library that has cut a release someone links falls back to the MAJOR rule.
+
+**No existing adopter is affected.** All four incumbents have released consumers and stay on the MAJOR path; the four unprefixed `lib_version.o` / `lib_manifest.o` claimants are unchanged. The first library on the new path is `c64-mlkem`, registered in v0.10.7, which had already shipped prefixed members before this clause existed — the clause generalises a decision made under review rather than inventing a practice with no adopter.
 
 ### 0.10.7 — 2026-08-22
 
