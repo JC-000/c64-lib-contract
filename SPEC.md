@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.10.6 (2026-08-15)
+**Version:** 0.10.7 (2026-08-22)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -113,6 +113,7 @@ Every library that claims any ZP slots MUST publish them as `.exportzp`-ed equat
 | `fe25519_` `fe_` `x25_` `mul_` `sqr_` `x25519_` | `c64-x25519` |
 | `polyval_` `pv_` | `c64-polyval` |
 | `cc20_` `poly_` `w32_` `ct_` `chacha_` `chacha20poly1305_` | `c64-ChaCha20-Poly1305` |
+| `mlkem_` | `c64-mlkem` |
 
 Every library's §6.1 `<shortname>_` is registered to it by construction (v0.9.2 — the general-scratch rule below implied this; the table now states it, closing the gap the first `chacha20poly1305_zp_*` migration exposed in [chacha#78](https://github.com/JC-000/c64-ChaCha20-Poly1305/pull/78)). General-purpose scratch takes `<shortname>_zp_<role>` (e.g., `nistcurves_zp_tmp1`). Known migration items, riding the §6.5 rename window **with its suppression gate** (deprecated bare slot names sit behind `LIB_NO_BARE_EXPORTS`, per §6.5/#88 — an ungated bare alias would preserve the #83 collision for the window's whole duration): `c64-nist-curves`' live bare `zp_tmp1`/`zp_tmp2`/`zp_ptr1`/`zp_ptr2`; `c64-x25519`'s `poly_carry` (a `mul_8x8` carry byte, colliding with the `poly_` registration) renames into its `mul_` family; `c64-ChaCha20-Poly1305`'s bare `.importzp` names move in the same window.
 
@@ -330,7 +331,7 @@ Manifest equate *names* stay per-library (`LIB_<X>_RESIDENT_BYTES`); variant ide
 
 The following are contract surface, subject to §7 semver and the rename window below: exported symbols and their `LIB_<X>_` families; §2 ZP slot names (registry in §2); §4 segment names; archive basenames (§6.1); **archive member basenames**; make target names (§6.1); the §6.2 variables and every define family they forward.
 
-Archive member basenames are a flat namespace under `ar65` composition and extraction tooling — today `lib_version.o` and `lib_manifest.o` ship in all four adopters, `zp_config.o` in three. At each library's next MAJOR, member basenames MUST take the `<shortname>_` prefix (`x25519_lib_version.o`). Members cannot carry two names at once, which is why this rides MAJOR rather than a window.
+Archive member basenames are a flat namespace under `ar65` composition and extraction tooling — today `lib_version.o` and `lib_manifest.o` ship unprefixed in four adopters, `zp_config.o` in three. At each library's next MAJOR, member basenames MUST take the `<shortname>_` prefix (`x25519_lib_version.o`). Members cannot carry two names at once, which is why this rides MAJOR rather than a window.
 
 **Rename window (the [#70](https://github.com/JC-000/c64-lib-contract/issues/70) rule).** Any rename of a surface element MUST ship both names for at least one MINOR release, the old form documented as deprecated, before removal at the next MAJOR (or v1.0, whichever comes first). Elements that cannot dual-name (archive members) change only at MAJOR.
 
@@ -1151,6 +1152,18 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.10.7 — 2026-08-22
+
+Registry (PATCH): **`mlkem_` is registered to `c64-mlkem`**, the first new adopter since the §2 ZP prefix registry existed (it was created in v0.9.0 already populated with the four incumbents, so the intake path it describes had never actually been walked). Additive and collision-free: the library's entire ZP surface is `mlkem_zp_src` / `mlkem_zp_dst` / `mlkem_zp_len` / `mlkem_zp_tmp` — 8 bytes, all under the registered prefix, checked against every existing entry per the clause's intake requirement. No obligation changes for any existing adopter. Classification follows the v0.9.2 precedent, which added `chacha20poly1305_` to this same table as a PATCH.
+
+One consequential wording fix rides along, non-normative: §6.5's flat-namespace sentence said `lib_version.o` and `lib_manifest.o` "ship in all four adopters", which goes ambiguous the moment a fifth row exists. It now reads "ship **unprefixed** in four adopters" — still four, because `c64-mlkem` ships `mlkem_lib_version.o` / `mlkem_lib_manifest.o` from its first archive and never joins the unprefixed set. (Whether §6.5 should *recommend* that for zero-consumer libraries generally is new normative text and rides its own MINOR; it is deliberately not in this release.)
+
+Two observations from the intake worth recording, since both concern clauses whose behaviour had only been described from the incumbent side:
+
+**The §6.2 consumer-assembled ZP model works as advertised for a library built on it from scratch.** §6.2 calls it "the recommended shape for new libraries" on the strength of `c64-ChaCha20-Poly1305`, which arrived at it by migration; `c64-mlkem` is the first to adopt it at birth. `zp_config.s` ships in no archive, archive TUs `.importzp`, and a consumer slot override needs no library rebuild — confirmed end to end (`make CONTRACT_ZP_DEFINES="-D mlkem_zp_src=0x40"` relocates the slot, verified in the linked build's labels), and the library enforces rather than merely intends it: its `check-archives` target fails the build if the ZP-defining TU or any driver object reaches an archive. The adopter-side cost is one real constraint worth naming for the next library: the ZP-defining TU must be excluded from `LIB_OBJS` *and* included in the standalone PRG's link set, which is easy to get backwards and fails only at a consumer's link, not the library's own.
+
+**The intake's step-6 "no tables above the floor" path had also never been exercised.** `adopters.md` requires `docs/precalc-tables.md` even from a library with nothing clearing the §8.0 floor, and `c64-mlkem` is that case: its largest table is the 192 B FIPS 202 round-constant sequence, which is hot-loop-read but 64 bytes short of the 256 B threshold, and everything else is 16–25 B. It therefore files the enumeration with rationale and emits **zero** `LIB_PRECALC_*` exports — consistent in both directions, which is what the merge gate checks. The rule read unambiguously and needed no change; noted only because the reviewer-facing half of it ("a row without the export blocks merge") is symmetric and a zero-table library sits exactly on that symmetry.
 
 ### 0.10.6 — 2026-08-15
 
