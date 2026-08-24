@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.11.1 (2026-08-23)
+**Version:** 0.12.0 (2026-08-24)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -989,7 +989,7 @@ NET_FAMILY_UDP  = $0004
 NET_FAMILY_DNS  = $0008
 ```
 
-Keeping them unexported is deliberate: both sides of the link carry the header, and only exported symbols can collide at link time. `NET_BACKEND_FAMILIES` is the sole exported symbol in §13.0 and is per-backend, so a consumer linking two backends is a configuration error the linker will name rather than a naming defect in this clause (contrast the unprefixed §1/§8.4 manifest exports in [#43](https://github.com/JC-000/c64-lib-contract/issues/43)). Adopters copy the block verbatim rather than deriving the values, exactly as the §8.x bit constants are copied.
+Keeping them unexported is deliberate: both sides of the link carry the header, and only exported symbols can collide at link time. The byte-for-byte source adopters copy is [`net_families.inc`](net_families.inc) at this repo's root (the fenced block above is shown for readability), exactly as [`precalc_table.inc`](precalc_table.inc) is for §8.0. `NET_BACKEND_FAMILIES` is the sole exported symbol in §13.0 and is per-backend, so a consumer linking two backends is a configuration error the linker will name rather than a naming defect in this clause (contrast the unprefixed §1/§8.4 manifest exports in [#43](https://github.com/JC-000/c64-lib-contract/issues/43)). Adopters copy the block verbatim rather than deriving the values, exactly as the §8.x bit constants are copied.
 
 ```asm
 ; src/net/<backend>/net_manifest.s
@@ -1070,10 +1070,32 @@ Every entry point returns C=0 on success and C=1 on failure with `net_last_error
 |---|---|
 | `$01-$3F` | Contract-generic codes (none allocated yet; future §13 revisions allocate here) |
 | `$40-$7F` | ip65-family backends |
-| `$80-$BF` | UCI-family backends — the existing `UCI_ERR_*` values (`$81-$89`) are grandfathered unchanged |
+| `$80-$BF` | UCI-family backends — the existing `UCI_ERR_*` values (`$81-$8A`) are grandfathered unchanged |
 | `$C0-$FF` | Consumer-private experiments; never allocated by this contract |
 
 A backend MUST emit only `$00` or codes from its own family range.
+
+**Allocation table (v0.12.0).** A family range is ONE namespace shared by every backend of that family across all consumers — the two UCI adapters in the fleet (`c64-https`, `c64-wireguard`) emit into the same `$80-$BF`, and a consumer reading a `net_last_error` from either must be able to name it. Codes are therefore allocated **here first**, then in the adapter; a value in this table is never reassigned. The `$8A` entry is the case that motivated the table: `c64-wireguard` allocated it independently on 2026-08-24, and nothing but a cross-repo diff would have caught a second adapter picking `$8A` for something else.
+
+| Code | Name | Meaning | Allocated by |
+|---|---|---|---|
+| `$41` | `NET_ERR_IP65_INIT` | `ip65_init` failed (no RR-Net / cs8900a) | c64-https |
+| `$42` | `NET_ERR_IP65_DHCP` | `ip65_dhcp_init` failed (no lease) | c64-https |
+| `$43` | `NET_ERR_IP65_DNS` | `ip65_dns_resolve` failed | c64-https |
+| `$44` | `NET_ERR_IP65_CONNECT` | `ip65_tcp_connect` failed | c64-https |
+| `$45` | `NET_ERR_IP65_SEND` | `ip65_tcp_send` failed | c64-https |
+| `$81` | `UCI_ERR_NOT_PRESENT` | `$DF1D` did not read back the UCI ID byte `$C9` | c64-https (grandfathered) |
+| `$82` | `UCI_ERR_CMD_FAILED` | error bit set after PUSH_CMD | c64-https (grandfathered) |
+| `$83` | `UCI_ERR_NO_IP` | GET_IPADDR returned all-zero on every probed interface | c64-https (grandfathered) |
+| `$84` | `UCI_ERR_CONNECT_FAIL` | TCP_CONNECT returned an error bit | c64-https (grandfathered) |
+| `$85` | `UCI_ERR_SEND_FAIL` | SOCKET_WRITE returned an error bit | c64-https (grandfathered) |
+| `$86` | `UCI_ERR_READ_FAIL` | SOCKET_READ returned an error bit | c64-https (grandfathered) |
+| `$87` | `UCI_ERR_SHORT_WRITE` | SOCKET_WRITE wrote fewer bytes than requested | c64-https (grandfathered) |
+| `$88` | `UCI_ERR_NO_SOCKET` | socket-open response yielded no socket id (phantom socket) | c64-https (grandfathered) |
+| `$89` | `UCI_ERR_WAIT_TIMEOUT` | a §13.4 bounded wait exceeded its wall-clock budget | c64-https (grandfathered) |
+| `$8A` | `UCI_ERR_LONG_READ` | SOCKET_READ claimed more bytes than were requested | c64-wireguard (2026-08-24) |
+
+The ip65 codes name the adapter entry point that failed rather than a driver cause, because the ip65 driver reports only a carry. Not every backend emits every code in its family's table (`c64-https`'s UCI adapter reserves `$8A` without emitting it yet); a consumer decoding the byte uses the table, not the emitting adapter's header.
 
 ### 13.3 Buffer ownership and 16-bit-safe lengths
 
@@ -1146,7 +1168,7 @@ Each consumer ships a `net_abi_asserts` translation unit (mirroring the §3/§8.
 
 | Consumer | Items |
 |---|---|
-| `c64-https` ([#70](https://github.com/JC-000/c64-https/issues/70)) | De-facto surface members missing from `net_abi.inc` (`net_send_len`, the ring symbols, `net_recv_ready`/`net_recv_byte` drain helpers — declare or retire per §13.1/§13.3); `net_tcp_set_recv_cb` stub to delete; adopt `NET_TCP_*` state names (values unchanged); ship `net_manifest.s` + `net_abi_asserts`. |
+| `c64-https` ([#70](https://github.com/JC-000/c64-https/issues/70)) | **Aligned** ([c64-https#142](https://github.com/JC-000/c64-https/pull/142), 2026-08-24): `net_abi.inc` is `.include`d by every network-touching TU and imports the full core/TCP/DNS surface; ip65 grew `net_dhcp_acquire`, `net_local_ip`, `net_resolved_ip`, `net_last_error` (codes `$41-$45`, table above) and `net_tcp_state`; `net_tcp_set_recv_cb` deleted, `NET_TCP_*` names adopted, `net_print_ip` moved consumer-side; both backends ship `net_manifest.s` (ip65 with §13.7 blob equates link-asserted against the `.incbin` size) and the consumer ships `net_abi_asserts.s`. UCI now sets `tcp_recv_overflow` (§13.3). |
 | `c64-wireguard` ([#48](https://github.com/JC-000/c64-wireguard/issues/48)) | Rename `net_dhcp` → `net_dhcp_acquire`; retire `net_poll`'s "C=0 = packet" meaning (§13.2); un-export `net_save_zp`/`net_restore_zp` (§13.5); replace `wg_peer_ip`/`wg_peer_port` reads in the adapter with `net_udp_dest_ip`/`net_udp_dest_port`; rename send globals to `net_udp_send_ptr`/`net_udp_send_len`; **resync the UCI adapter with `c64-https`'s hardened one** (bounded waits §13.4, fence floor §13.6, phantom-socket detection — its `uci_errors.inc` predates `$88`/`$89`); ship `net_manifest.s` + `net_abi_asserts`. |
 
 The resync item is the payoff case for this chapter: those fixes exist because real hardware wedged, and the contract's job is to make them travel.
@@ -1171,6 +1193,14 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.12.0 — 2026-08-24
+
+Normative (MINOR): **§13.2 gains an error-code allocation table, and `$8A` joins the grandfathered UCI set.** The v0.6.0 text carved `net_last_error` into family ranges and grandfathered `$81-$89`, but said nothing about *who allocates the next value* — and a family range is one namespace across every consumer's adapter of that family. The gap was found live: `c64-wireguard` allocated `$8A UCI_ERR_LONG_READ` on 2026-08-24 in its own `uci_errors.inc`, and only a cross-repo comparison during the c64-https §13 alignment ([c64-https#142](https://github.com/JC-000/c64-https/pull/142)) noticed that c64-https's copy stopped at `$89`. Had c64-https allocated `$8A` for anything else first, two adapters would have emitted the same byte with different meanings and no assert anywhere could have said so. The clause now carries the table — ip65 `$41-$45` (allocated by c64-https with its §13 alignment), UCI `$81-$8A` — and the rule that codes are allocated in the table first, then in the adapter, and never reassigned.
+
+Classified MINOR because the table is new normative content (allocations plus an allocate-here-first rule) rather than a restatement; the range carve-up, bit values and every previously allocated code are unchanged, so no conformant adapter is affected.
+
+Also in this release, both doc-only: **§13.0 names a canonical copy source** — [`net_families.inc`](net_families.inc) at the repo root, the byte-for-byte file adopters copy, mirroring `precalc_table.inc` for §8.0 (the clause said "copy the block verbatim" without saying from where; c64-https and c64-wireguard would otherwise each have transcribed it from the fenced example). **§13.8's intake table records c64-https as aligned** (c64-https#142: `net_abi.inc` made real and included by every network-touching TU, ip65 core-family gap closed with an error channel, manifests and consumer asserts shipped); the c64-wireguard row is unchanged and tracked in [c64-wireguard#48](https://github.com/JC-000/c64-wireguard/issues/48).
 
 ### 0.11.1 — 2026-08-23
 
