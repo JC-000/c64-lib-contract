@@ -14,9 +14,9 @@
 CA65 ?= ca65
 BUILD_DIR := build
 
-.PHONY: verify verify-default verify-noBare verify-negative verify-addrsize clean
+.PHONY: verify verify-default verify-noBare verify-negative verify-addrsize verify-net-families clean
 
-verify: verify-default verify-noBare verify-negative verify-addrsize
+verify: verify-default verify-noBare verify-negative verify-addrsize verify-net-families
 	@echo "verify: precalc_table.inc assembles cleanly in both export modes"
 
 verify-default: $(BUILD_DIR)/precalc_table_smoke.o
@@ -61,6 +61,19 @@ verify-addrsize: $(BUILD_DIR)/precalc_table_smoke.o
 	done; \
 	if [ $$bad -ne 0 ]; then exit 1; fi; \
 	echo "verify-addrsize: ok — _REGION/_SHARED absolute, oversized _SIZE still far"
+
+# §13.0 canonical net_families.inc (v0.12.0). Two checks: the root file
+# assembles standalone with the four values the contract specifies, and the
+# fenced block in SPEC.md §13.0 carries the same four values as the file —
+# the polyval#18 defect was a copy transcribed from the block that drifted
+# from the canonical file, and prose can be edited without touching the file.
+verify-net-families: examples/net_families_smoke.s net_families.inc SPEC.md | $(BUILD_DIR)
+	@$(CA65) -I . -o $(BUILD_DIR)/net_families_smoke.o examples/net_families_smoke.s
+	@f=$$(grep -E '^NET_FAMILY_(CORE|TCP|UDP|DNS) *= *\$$[0-9A-Fa-f]+' net_families.inc | sed -E 's/[[:space:]]+/ /g; s/ *;.*//' | sort); \
+	b=$$(awk '/^; src\/net\/net_families.inc/{f=1} f&&/^```/{exit} f' SPEC.md | grep -E '^NET_FAMILY_(CORE|TCP|UDP|DNS) *= *\$$[0-9A-Fa-f]+' | sed -E 's/[[:space:]]+/ /g; s/ *;.*//' | sort); \
+	if [ -z "$$f" ] || [ -z "$$b" ]; then echo "verify-net-families: FAIL — could not extract the four NET_FAMILY_* values from both the file and SPEC.md §13.0"; exit 1; fi; \
+	if [ "$$f" != "$$b" ]; then echo "verify-net-families: FAIL — net_families.inc and the SPEC.md §13.0 block disagree:"; echo "$$f"; echo "--- vs ---"; echo "$$b"; exit 1; fi; \
+	echo "verify-net-families: ok — net_families.inc assembles, values match SPEC.md §13.0"
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
