@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.12.1 (2026-08-27)
+**Version:** 0.13.0 (2026-08-27)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -1071,7 +1071,7 @@ Every entry point returns C=0 on success and C=1 on failure with `net_last_error
 
 | Range | Owner |
 |---|---|
-| `$01-$3F` | Contract-generic codes (none allocated yet; future §13 revisions allocate here) |
+| `$01-$3F` | Contract-generic codes — platform conditions no single family owns. `$01` allocated v0.13.0; further §13 revisions allocate here |
 | `$40-$7F` | ip65-family backends |
 | `$80-$BF` | UCI-family backends — the pre-existing `UCI_ERR_*` values (`$81-$89`) are grandfathered unchanged; `$8A` was allocated to resolve the collision below; `$8B` is the first code allocated under the table rule; `$8C` the second, and the first with an observable trigger |
 | `$C0-$FF` | Consumer-private experiments; never allocated by this contract |
@@ -1082,6 +1082,7 @@ A backend MUST emit only `$00` or codes from its own family range.
 
 | Code | Name | Meaning | C flag | Allocated by |
 |---|---|---|---|---|
+| `$01` | `NET_ERR_TIMEBASE_STOPPED` | `net_init` started the CIA TOD and its tenths digit did not change within the verification spin (§13.4) — no bounded wait can be trusted, so the backend refuses to initialise. Any family emits this. | terminal (C=1) | contract, v0.13.0 ([#145](https://github.com/JC-000/c64-lib-contract/issues/145)) |
 | `$41` | `NET_ERR_IP65_INIT` | `ip65_init` failed (no RR-Net / cs8900a) | terminal (C=1) | c64-https |
 | `$42` | `NET_ERR_IP65_DHCP` | `ip65_dhcp_init` failed (no lease) | terminal (C=1) | c64-https |
 | `$43` | `NET_ERR_IP65_DNS` | `ip65_dns_resolve` failed | terminal (C=1) | c64-https |
@@ -1147,7 +1148,16 @@ Any adapter loop that waits on device state (status registers, response drains, 
 
 **Failure mode this prevents.** Per-iteration cost scales with CPU clock while device-side operation durations do not. A cycle-counted budget tuned at 1 MHz collapses at 48-64 MHz turbo: `c64-https`'s abandoned `feat/net-drain-abi` branch split waits into fast/long tiers with cycle budgets and broke DHCP at turbo for exactly this reason. The unbounded alternative is worse — a wedged device converts to a wedged C64 (a real UCI FPGA wedge during CertificateVerify recv turned into a 1843 s test-sentinel timeout before the bounded conversion).
 
-The reference implementation is `c64-https`'s `uci_wait_idle`: sample CIA1 TOD at entry (read order HOUR→MIN→SEC→TENTHS to latch/unlatch), re-read TENTHS per spin pass, bail after a fixed number of transitions (~5 s default), state in SMC bytes where the adapter's no-ZP convention requires it. Consumers running at non-standard clocks get the same wall-clock bound for free.
+**The time source MUST be started and verified by the adapter (v0.13.0, normative).** A CIA TOD does not run until its tenths register is written, and neither the KERNAL nor a loader starts it. An adapter MUST NOT assume the TOD is running; in `net_init`, before the first bounded wait, it MUST:
+
+1. **Start it**: with CRB (`$DC0F`) bit 7 clear (writes address the clock, not the alarm), write hours `$DC0B` — which halts the clock — then minutes `$DC0A`, seconds `$DC09`, and finally tenths `$DC08`, which starts it. Any value is fine; the bound counts transitions, not absolute time.
+2. **Verify it ticks**: spin until the tenths digit changes, the spin bounded by an iteration count sized for the *fastest* supported clock (≥ 2 tenths' worth at 64 MHz; at slower clocks the same count spans more wall time and the check exits earlier on success). If the digit never changes, `net_init` fails C=1 with `net_last_error = $01 NET_ERR_TIMEBASE_STOPPED` (§13.2, contract-generic: a dead time base is a property of the platform, not of a backend family). Verification is not optional: the U64E's TOD is an emulation fed by the video-frame tick, and an emulator or firmware that stops feeding it would otherwise recreate the failure below silently.
+
+CRA (`$DC0E`) bit 7 selects the 50 Hz / 60 Hz TOD input, which shifts every bound by 20 % between the two; bounds SHOULD be stated with that tolerance, and an adapter MAY read the bit to normalise.
+
+**Failure mode this prevents (measured, 2026-08-27, [#145](https://github.com/JC-000/c64-lib-contract/issues/145)).** Both UCI adapters in the fleet implemented the wait shape below and neither ever wrote the TOD. IRQ-hooked sampling on a U64E in the c64-wireguard#58 stalled state: 207 reads over 3 s, TOD `00:00:00.0` throughout, hour byte at its reset value. Every "wall-clock bounded" wait had therefore been **unbounded on real hardware since the day it was written** — no live run in either project's history had ever produced `$89 UCI_ERR_WAIT_TIMEOUT` — and a firmware command that did not complete hung the C64 forever. Proof of mechanism: a one-shot `sta $DC08` from the hook made the hung `net_udp_send` expire within 2 s and return C=1. The bounded-wait conversion had been "tested" only by runs that ended because the device answered, never because the bound fired; a §13.8 conformance test for this clause MUST include a case where the device does *not* answer (e.g. a wait on a socket that is never written) and MUST observe the timeout code.
+
+The reference wait shape is `c64-https`'s `uci_wait_idle`: sample CIA1 TOD at entry (read order HOUR→MIN→SEC→TENTHS to latch/unlatch), re-read TENTHS per spin pass, bail after a fixed number of transitions (~5 s default), state in SMC bytes where the adapter's no-ZP convention requires it. It is a correct bound only once the clock above is running — the pre-v0.13.0 reference did not start it. Consumers running at non-standard clocks get the same wall-clock bound for free.
 
 ### 13.5 Zero-page discipline
 
@@ -1229,6 +1239,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.13.0 — 2026-08-27 (draft)
+
+Normative (MINOR): **§13.4 requires the adapter to start and verify its wall-clock source.** Measured the day v0.12.0 merged ([#145](https://github.com/JC-000/c64-lib-contract/issues/145)): the CIA TOD on a U64E sits at `00:00:00.0` after reset because nothing writes its tenths register, so the reference `uci_wait_idle` shape — and both fleet adapters that copied it — had bounds that never expired. Every §13.4 wait had been unbounded on hardware since it was written, which is the C64-hang half of c64-wireguard#58, and no run had ever produced `$89`. The clause now requires `net_init` to start the TOD (CRB bit 7 clear; hours, minutes, seconds, then tenths) and to **verify it ticks** before the first bounded wait, failing with the first contract-generic code, **`$01 NET_ERR_TIMEBASE_STOPPED`**, if it does not — verification because the U64E TOD is itself an emulation, and an emulator that stops feeding it would recreate the bug silently. §13.8 conformance for the clause must include a wait that the device never satisfies. The lesson is the cycle's usual one: the mechanism was assumed, tested only on the path where it did not matter, and named as the reference.
 
 ### 0.12.1 — 2026-08-27
 
