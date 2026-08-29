@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.14.1 (2026-08-28)
+**Version:** 0.14.2 (2026-08-29)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -749,12 +749,12 @@ sqtab_hi = LIB_SHARED_SQTAB_BASE + $0200
 .assert sqtab_hi = sqtab_lo + $0200,        error, "sqtab_hi must follow sqtab_lo by $0200"
 ```
 
-The `.ifndef` guard lets the library assemble standalone with its existing default; the consumer overrides via `ca65 -D 'LIB_SHARED_SQTAB_BASE=$<addr>'` (single-quoted — §2's `$`-hex quoting note). The two `.assert`s catch misconfigurations at assemble time:
+The `.ifndef` guard lets the library assemble standalone with its existing default; the consumer overrides via `ca65 -D LIB_SHARED_SQTAB_BASE=0x<addr>` — `$`-free, `0x` hex or decimal, per §2's `$`-hex quoting note and §6.2, since this define rides `CONTRACT_DEFINES` and so passes through make (v0.14.2: the examples previously showed a single-quoted `$` form, which survives a shell command line but not a make variable — `$40` and `$$40` reach ca65 as `0`, and `0 & $00ff = 0` satisfies the page-alignment assert below, placing the table in zero page with no diagnostic). The two `.assert`s catch misconfigurations at assemble time:
 
 - `LIB_SHARED_SQTAB_BASE & $00ff == 0` — CT-strict `abs,x` indexing requires a page-aligned base for cycle-stable loads.
 - `sqtab_hi - sqtab_lo == $0200` — adopters that dispatch via self-modifying code on the lo→hi delta fold this constant into the opcode hi-byte patching; alternative deltas silently miscompute.
 
-The contract pins *shape*, not *placement*. A consumer linking multiple sqtab-using libraries supplies one `-D 'LIB_SHARED_SQTAB_BASE=$<addr>'` and the libraries agree.
+The contract pins *shape*, not *placement*. A consumer linking multiple sqtab-using libraries supplies one `-D LIB_SHARED_SQTAB_BASE=0x<addr>` and the libraries agree.
 
 **Export discipline (v0.8.5).** `LIB_SHARED_SQTAB_BASE` is consumer *input*. Libraries MUST NOT `.export` it: two libraries exporting the same unprefixed name is a guaranteed `ld65: Duplicate external identifier` in any composed link (the [#82](https://github.com/JC-000/c64-lib-contract/issues/82)-class failure, which hit §8.2's analogous equates). Fleet practice was already unanimous — no adopter exports it; this sentence makes the practice normative.
 
@@ -1252,6 +1252,10 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.14.2 — 2026-08-29
+
+Doc-only (PATCH, the 0.8.6 precedent, zero normative change): **§8.1's two `LIB_SHARED_SQTAB_BASE` override examples are shown `$`-free.** Both read `ca65 -D 'LIB_SHARED_SQTAB_BASE=$<addr>'` with a "single-quoted" aside. The quotes protect the value from the *shell*, which is not where this define is composed: §6.2 lists `LIB_SHARED_SQTAB_BASE` among the values that ride `CONTRACT_DEFINES`, i.e. through **make**, where §2's own measurement applies — `$40` and `$$40` reach ca65 as `0`, `$$$$40` as the shell's PID. Worse than §2's ZP case, the §8.1 asserts do not catch it: `0 & $00ff = 0` passes the page-alignment check, so a consumer pasting the old example gets `sqtab_lo = $0000` and a 1,024-byte table written over zero page, with no diagnostic from make, the shell, ca65 or ld65. Every shipped adopter Makefile and every c64-https integration script already passes `0x<addr>` (measured in c64-mlkem during its Phase 2 alignment and recorded in its `CLAUDE.md` and `zp_config.s`; the first library to write the header from the SPEC text rather than from a sibling's copy). The examples now match §6.2's `0x` form and a parenthetical says why. No RFC-2119 keyword added or altered — §2's make-interface rule and §6.2's `$`-free rule already govern this define; the clause is brought into line with them, not extended.
 
 ### 0.14.1 — 2026-08-28
 
