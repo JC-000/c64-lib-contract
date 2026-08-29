@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.14.2 (2026-08-29)
+**Version:** 0.15.0 (2026-08-29)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -678,6 +678,8 @@ LIB_PRECALC_TABLE "sha384_k",     640,    PRECALC_REGION_RODATA, PRECALC_SHARED_
 
 The fifth argument is the library prefix (§1/§5 `<X>`), **required as of v0.7.0**. It is what makes the emitted equates collision-free: the same `"sqtab"` invocation in two libraries yields `LIB_NISTCURVES_PRECALC_sqtab_SIZE` and `LIB_X25519_PRECALC_sqtab_SIZE`, which a consumer can import together. The table *name* stays unprefixed and normative (see the §8.1/§8.2 back-links below) — the prefix distinguishes the *declaring library*, never the table.
 
+**Zero-consumer carve-out for the bare triple (v0.15.0).** The bare `LIB_PRECALC_<name>_*` triple exists for the same reason as §1's bare version exports — so existing single-library consumers keep working through v0.x — and it is the same collision class ([#43](https://github.com/JC-000/c64-lib-contract/issues/43)): two adopters enumerating `"sqtab"` emit the identical bare symbol. A library onboarding with **no released consumers** (§1's scope test: no tagged release any consumer pins, checkable from tags and `consumers.md`) SHOULD NOT emit the bare forms at all. It does so by defining `LIB_NO_BARE_EXPORTS` in the single TU that includes the macro, `.ifndef`-guarded so a consumer's build-wide `-D` is not a redefinition; the canonical `precalc_table.inc` is unchanged, since the bare emission is already gated on that define. `SHOULD NOT` rather than `MUST NOT`, for §1's reason — the forms are harmless in a single-library link, and the ungated-emission prohibition in §1 is unaffected. First library on this path: `c64-mlkem` (Phase 2, v0.5.0), whose export surface is byte-identical with and without `-D LIB_NO_BARE_EXPORTS=1` as a standing invariant, guarded by its `make check-prefix`.
+
 **Consumer-side composition** (optional, for the consumer that wants to cross-check a composed library's shape). The canonical cross-check reads the exported equates out of the post-build object via `od65 --dump-exports` — the same tool §8.0 already uses for the adopter-intake audit above — and greps for the `_PRECALC_<name>_*` symbol family:
 
 ```sh
@@ -1252,6 +1254,14 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.15.0 — 2026-08-29
+
+Normative (MINOR): **§8.4 gains a zero-consumer carve-out for the deprecated bare `LIB_PRECALC_<name>_*` triple**, completing the set v0.11.0 started for §1's bare version exports and §6.5's member basenames. The bare triple is justified the same way §1's bare exports are — existing single-library consumers keep working — and it is the same [#43](https://github.com/JC-000/c64-lib-contract/issues/43) collision class: two adopters enumerating `"sqtab"` emit the identical bare symbol. A library nobody has linked yet has no such consumer, so the emission protects no one while adding a claimant. Such a library now SHOULD NOT emit the bare forms, by defining `LIB_NO_BARE_EXPORTS` (`.ifndef`-guarded) in the one TU that includes the macro; the canonical `precalc_table.inc` is byte-for-byte unchanged, because the bare emission was already gated on that define — the clause adds a rule for who sets it, not a mechanism.
+
+Classified MINOR for v0.11.0's reason: a new RFC-2119 keyword in a clause that previously carried only the mechanism and no rule for a zero-consumer library. Same scope test as §1 and §6.5 (no tagged release any consumer pins, verifiable from tags and `consumers.md`), same `SHOULD NOT`-not-`MUST NOT` reasoning (the forms stay harmless in a single-library link).
+
+**No existing adopter is affected.** All four incumbents have released consumers and keep emitting the bare triple through v0.x. The first library on the path is `c64-mlkem`, which shipped this shape at v0.5.0 before the clause existed — its manifest TU defines `LIB_NO_BARE_EXPORTS` before the include and its `make check-prefix` fails the build on any bare export in a shipped archive — so, as with v0.11.0's two carve-outs, the clause generalises a decision made under review rather than inventing a practice with no adopter. Surfaced by that library's Phase 2 alignment pass, which found the SPEC silent here while §1 and §6.5 had both been answered.
 
 ### 0.14.2 — 2026-08-29
 
