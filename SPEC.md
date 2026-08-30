@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.15.0 (2026-08-29)
+**Version:** 0.16.0 (2026-08-30)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -1234,6 +1234,39 @@ Each consumer ships a `net_abi_asserts` translation unit (mirroring the §3/§8.
 
 The resync item is the payoff case for this chapter: those fixes exist because real hardware wedged, and the contract's job is to make them travel.
 
+## 14. Entry-point termination and documented domain
+
+§13.4 requires a network adapter to bound every wait, because an unbounded wait wedges the machine. The same failure exists one chapter over and had no rule: an entry point whose loop leaves only on a numeric condition that some input never satisfies. A C64 has no watchdog and no scheduler, so a non-terminating loop in a library is not a hung call — it is a dead machine requiring a power cycle, which is the reasoning §13.4 already accepted for the network side.
+
+| | §13.4 (network) | this section (any entry point) |
+|---|---|---|
+| Shape | wait for a device event that never arrives | loop for a numeric condition that never holds |
+| Trigger | time base never started, so no bound expires | input outside the loop's implicit domain |
+| Consequence | machine wedges | machine wedges |
+| Found by tests? | no — no run had ever produced `$89` | no — the domain edge was never fed in |
+
+### 14.1 Terminate, or publish the domain that does
+
+A public entry point MUST terminate on every input of its parameter type, **or** document the domain over which it terminates wherever that domain is narrower than the type. Where the non-terminating inputs can be excluded cheaply at the entry, the library SHOULD do so and return an error — carry set, per the convention its other entry points already use — rather than rely on every caller having read the domain.
+
+**A documented domain MUST be stated in the terms the implementation tests** — a residue class, a range, a ceiling — not in narrower terms that name one member of the excluded set. [c64-nist-curves#138](https://github.com/JC-000/c64-nist-curves/pull/138) guards on *input ≡ 0 mod the modulus*: all-zero **or byte-equal to the modulus**, because the audit suite proved `inv(p)` hangs exactly as `inv(0)` does. A library documenting "undefined for zero" would have satisfied this clause as a weaker draft of it stated it, and still hung on the more reachable of the two — nobody passes literal zero by accident, but an un-reduced intermediate landing exactly on the modulus is an ordinary arithmetic outcome. **A domain documented in terms narrower than the real exclusion is worse than none, because it survives review while the gap stays open.**
+
+Ordinary preconditions are the same obligation at lower severity: [c64-nist-curves#135](https://github.com/JC-000/c64-nist-curves/issues/135) covers three that were undocumented (`fp_mod_add`/`fp_mod_sub` canonical inputs, `fp_mod_mul_n` one operand < n) and one comment that was false. A precondition nobody wrote down is a domain nobody can check.
+
+### 14.2 Publish a bound as an equate, not as prose
+
+Where the narrower domain is a bound the consumer must respect — a maximum length, a ceiling — the library SHOULD publish it as an **equate in a consumer-includable header** and document the entry point's behaviour outside it. A consumer SHOULD `.assert` against that equate rather than hard-code the value.
+
+This is §13.3's `net_caps.inc` pattern arriving independently in the crypto chapters: [c64-polyval#76](https://github.com/JC-000/c64-polyval/pull/76) published `gcmsiv_max_pt_len = 64` with buffers sized from it and both entry points rejecting above it, before any clause asked. §13.3 exists because a number living only in prose gets re-derived wrongly by each consumer, and nothing about that lesson stops at the chapter boundary. Publishing it also makes the domain testable: once the bound is a named constant, "feed the bound, then feed bound+1" is a check whose failure mode is obvious, which is what [c64-polyval#76](https://github.com/JC-000/c64-polyval/pull/76) then ran (`pt_len` ∈ {65,128,255} probes, rejection with ciphertext, tag and expanded key untouched).
+
+### 14.3 What this section does not require
+
+- **No mandated bound mechanism.** The bound is not the same kind of object in each case. For a wait it is wall-clock and the device is the unknown (§13.4); for a length countdown it is structural and free; for a binary extended GCD it is a function of the input. **Do not read that last case as unboundable** — for nonzero `a < p` the iteration count is bounded by `2·bitlen(p)` halvings plus the subtract steps, so `~2·bits + 2` is a proof, not a guess, and only the excluded residue class is genuinely unbounded. Where a termination bound is provable it SHOULD be stated, whether enforced by a guard at the entry or by a counted loop; choose between them on cost, not on feasibility.
+- **No per-entry-point audit burden.** Of `c64-nist-curves`'s public surface exactly one routine has an input-dependent termination condition — everything else is a fixed-trip loop or a fixed-width scalar walk — and `c64-ChaCha20-Poly1305` reports none at all, every loop a monotone length countdown with a zero guard on entry. Where that ratio holds, the cost of this section is "audit the loops once, then guard one or two".
+- **No constant-time claim, and no general cost figure.** A guard at the door is cheapest exactly where it is safest: in front of a routine whose timing is already input-dependent and whose inputs are public. `fp_mod_inv`'s guard costs 22 cycles on the fast path against ~750 kcy for the inversion, and its input-dependence adds nothing an attacker can use because a binary extended GCD is variable-time by construction and that library is verify-only. In front of a constant-time primitive taking secret inputs the same guard must be branchless, or the domain check belongs to the caller. That reasoning generalises; the 22 does not.
+
+**Severity, for calibration.** [c64-nist-curves#132](https://github.com/JC-000/c64-nist-curves/issues/132) was HIGH not because the hanging input was exotic but because it was the library's own output: `ec_jacobian_to_affine` inverted Z with no Z=0 test, and Z=0 is that library's point-at-infinity encoding — emitted by `ec_scalar_mul` for k∈{0,n}, by `ec_scalar_mul_var` for k≡0, and by `ec_point_add(P,−P)`. A consumer converting the library's own documented output to affine should not have to know it is a trap. It was correctly scoped by its filer as **not** reachable through `ecdsa_verify_256/384`, which rejects s=0 before the mod-n inversion and tests Z≠0 before the cofactor compare: a public-API hazard, not a signature-verification DoS. Both hang sites were guarded in [c64-nist-curves#139](https://github.com/JC-000/c64-nist-curves/pull/139) (merged 2026-08-30, `92ef7bc`).
+
 ## 9. Compatibility timeline
 
 - **2026-05-20 — v0.1.0.** Contract published with the six core sections (§1–§6); adopters land iteratively. Tracking issues filed against each adopter library.
@@ -1254,6 +1287,20 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.16.0 — 2026-08-30
+
+Normative (MINOR): **§14 gives entry points a termination obligation — the §13.4 bounded-wait rule, one chapter over.** §13.4 has required network adapters to bound every wait since v0.12.0, and to start and verify the time base since v0.13.0, because an unbounded wait wedges the machine. Nothing said the equivalent about a crypto entry point, and [c64-nist-curves#132](https://github.com/JC-000/c64-nist-curves/issues/132) (HIGH) was that gap realised: `fp_mod_inv`'s binary extended GCD never terminates on 0, `ec_jacobian_to_affine` inverted Z with no Z=0 test, and **Z=0 is that library's own point-at-infinity encoding** — so a consumer converting the library's own documented output locked the machine. Same shape, same consequence, same reason no test caught it: the failure path was never exercised. Filed as [#155](https://github.com/JC-000/c64-lib-contract/issues/155).
+
+The clause is **MUST terminate or document the domain, SHOULD guard at the entry** — the shape both responding adopters reached for unprompted, from opposite ends of the spectrum. `c64-nist-curves` has exactly one entry point with an input-dependent termination condition and shipped a guard for it; `c64-ChaCha20-Poly1305` has none at all (every loop a monotone length countdown with a zero guard) and owes only a stated ceiling. That spread is why the section states the obligation and leaves the mechanism open: the bound is wall-clock for a wait, structural for a countdown, and a function of the input for an inversion, and no single mandated mechanism serves all three.
+
+**The load-bearing sentence is the one about how a domain is written, and it was learned the hard way.** This issue was opened around "`fp_mod_inv` is undefined for 0". [c64-nist-curves#138](https://github.com/JC-000/c64-nist-curves/pull/138) then guarded on input **≡ 0 mod the modulus** — all-zero *or byte-equal to the modulus* — because the audit suite proved `inv(p)` hangs too. A library documenting "undefined for zero" would have satisfied the clause as originally drafted and still hung on the more reachable of the two inputs. §14.1 therefore requires the domain to be stated in the terms the implementation tests, and says plainly that a domain documented too narrowly is worse than none, because it survives review while the gap stays open.
+
+Two corrections from adopters are recorded in §14.3 rather than dropped. An input-dependent loop is **not** inherently unboundable — for binary extended GCD the count is bounded by `2·bitlen(p)` halvings plus the subtract steps, so `~2·bits + 2` is a proof; the reason to prefer a guard is cost, not feasibility, and the draft's contrary reasoning was wrong. And the guard's measured cheapness (22 cycles fast-path against ~750 kcy) does not generalise: it is cheap because it sits in front of a routine that is variable-time by construction and public-input by design in a verify-only library. In front of a constant-time primitive on secret inputs the same guard would need to be branchless. What generalises is the reasoning, not the number.
+
+§14.2 records the mechanism an adopter invented before the clause existed: [c64-polyval#76](https://github.com/JC-000/c64-polyval/pull/76) published `gcmsiv_max_pt_len = 64` as an equate in a consumer-includable header with buffers sized from it and both entry points rejecting above it — §13.3's `net_caps.inc` pattern, arrived at independently in the crypto chapters. A published equate is checkable at assembly time; a sentence in API.md is not.
+
+Classified MINOR: new normative content, no change to any existing clause, code, bit or equate. **Fleet position at merge:** `c64-polyval` conformant since #76; `c64-nist-curves` conformant at `master` since [#139](https://github.com/JC-000/c64-nist-curves/pull/139) (`92ef7bc`, 2026-08-30) closed #132 and #135, not yet at a tag; `c64-ChaCha20-Poly1305` owes one stated ceiling for `aead_data_len`, which its own analysis identified before this clause existed (API.md documents "LE 16-bit", and 65535 exceeds addressable buffer space). **This section is not retroactive**: an adopter conformant before it landed is not out of conformance the moment it does, and no adopter is out of conformance at a released tag on the day it lands.
 
 ### 0.15.0 — 2026-08-29
 
