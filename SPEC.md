@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 0.16.0 (2026-08-30)
+**Version:** 0.17.0 (2026-08-30)
 **Status:** Draft — under joint review by adopters and consumers.
 
 **Referencing a version.** Every version in §12 is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific contract revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming, since a recent tag does not imply recent content.
@@ -19,7 +19,7 @@ The contract is deliberately minimal. It governs symbols and conventions, not im
 
 | Kind | Sections | Who reads it |
 |---|---|---|
-| **Core** — every library, every consumer | §1 versioning · §2 zero page · §3 REU layout · §4 segments · §5 manifests · §6 build-and-consume · §7 semver · §14 entry-point termination | everyone |
+| **Core** — every library, every consumer | §1 versioning · §2 zero page · §3 REU layout · §4 segments · §5 manifests · §6 build-and-consume · §7 semver · §14 entry-point termination · §15 conformance evidence | everyone |
 | **Domain** — only if the library implements that domain | §8 shared crypto primitives · §13 network backend ABI | crypto libraries: §8; network backends: §13 |
 | **Meta** — project state | §9 compatibility timeline · §10 adopters · §11 consumers · §12 changelog | reference as needed |
 
@@ -1259,7 +1259,7 @@ Where the narrower domain is a bound the consumer must respect — a maximum len
 
 **Where the domain is a relation rather than a constant, this clause does not apply and §14.1 alone discharges the obligation.** `c64-ChaCha20-Poly1305`'s real restriction is `aead_data_ptr + aead_data_len <= $10000` — a relation over two caller-supplied values that no scalar expresses, and that a consumer whose buffer address is computed at runtime cannot assert at assembly time either. Publishing a scalar there is worse than publishing nothing: every candidate in circulation for that library was either vacuous (`$FFFF`, the field width) or wrong in §14.1's sense (`1500`, an MTU inherited from an unrelated consumer; `3840`, the size of its own fuzz harness's scratch window), and a consumer placing a buffer at `$FF00` satisfies `1500` and still wraps into zero page. Document the relation in the terms the implementation tests, guard it at the entry, and publish only what genuinely is constant.
 
-This is §13.3's `net_caps.inc` pattern arriving independently in the crypto chapters: [c64-polyval#76](https://github.com/JC-000/c64-polyval/pull/76) published `gcmsiv_max_pt_len = 64` with buffers sized from it and both entry points rejecting above it, before any clause asked. §13.3 exists because a number living only in prose gets re-derived wrongly by each consumer, and nothing about that lesson stops at the chapter boundary. Publishing it also makes the domain testable: once the bound is a named constant, "feed the bound, then feed bound+1" is a check whose failure mode is obvious, which is what [c64-polyval#76](https://github.com/JC-000/c64-polyval/pull/76) then ran (`pt_len` ∈ {65,128,255} probes, rejection with ciphertext, tag and expanded key untouched).
+This is §13.3's `net_caps.inc` pattern arriving independently in the crypto chapters: [c64-polyval#76](https://github.com/JC-000/c64-polyval/pull/76) published `gcmsiv_max_pt_len = 64` with buffers sized from it and both entry points rejecting above it, before any clause asked. §13.3 exists because a number living only in prose gets re-derived wrongly by each consumer, and nothing about that lesson stops at the chapter boundary. Publishing it also makes the domain testable, which is what **§15.1** asks of any check offered as evidence: once the bound is a named constant, "feed the bound, then feed bound+1" is a check whose failure mode is obvious, which is what [c64-polyval#76](https://github.com/JC-000/c64-polyval/pull/76) then ran (`pt_len` ∈ {65,128,255} probes, rejection with ciphertext, tag and expanded key untouched).
 
 ### 14.3 What this section does not require
 
@@ -1268,6 +1268,48 @@ This is §13.3's `net_caps.inc` pattern arriving independently in the crypto cha
 - **No constant-time claim, and no general cost figure.** A guard at the door is cheapest exactly where it is safest: in front of a routine whose timing is already input-dependent and whose inputs are public. `fp_mod_inv`'s guard costs 22 cycles on the fast path against ~750 kcy for the inversion, and its input-dependence adds nothing an attacker can use because a binary extended GCD is variable-time by construction and that library is verify-only. In front of a constant-time primitive taking secret inputs the same guard must be branchless, or the domain check belongs to the caller. That reasoning generalises; the 22 does not.
 
 **Severity, for calibration.** [c64-nist-curves#132](https://github.com/JC-000/c64-nist-curves/issues/132) was HIGH not because the hanging input was exotic but because it was the library's own output: `ec_jacobian_to_affine` inverted Z with no Z=0 test, and Z=0 is that library's point-at-infinity encoding — emitted by `ec_scalar_mul` for k∈{0,n}, by `ec_scalar_mul_var` for k≡0, and by `ec_point_add(P,−P)`. A consumer converting the library's own documented output to affine should not have to know it is a trap — and the hazard **rises** with defensive coding upstream, since a consumer that dutifully reduces its scalar mod n before calling is *more* likely to present k=0, not less. That inversion of the usual expectation is what makes it a trap rather than a corner case, and it generalises past this library. It was correctly scoped by its filer as **not** reachable through `ecdsa_verify_256/384`, which rejects s=0 before the mod-n inversion and tests Z≠0 before the cofactor compare: a public-API hazard, not a signature-verification DoS. Both hang sites were guarded in [c64-nist-curves#139](https://github.com/JC-000/c64-nist-curves/pull/139) (merged 2026-08-30, `92ef7bc`).
+
+## 15. Conformance evidence
+
+Several clauses in this contract are satisfied by a check rather than by a claim: §6.6's footprint asserts, §8.1's page-alignment assert, §8.2's settle assertion, §13.8's capability asserts, and §13.4's requirement that a conformance test include a case where the device does *not* answer. Each of those clauses reached, locally, for the same idea. This section states it once.
+
+### 15.1 A check offered as evidence SHOULD be shown capable of failing
+
+A conformance check offered as evidence — an `.assert`, a test case, a bounded wait — SHOULD be accompanied by a demonstration that it fails when the property it checks is false. **A check never observed to fail is not evidence that the property holds; it is evidence only that the check ran.**
+
+Deliberately SHOULD, and deliberately not prescriptive about method. Three techniques are already in fleet use and suit different kinds of check:
+
+- **Negative build** — define a constant past the bound and confirm the build fails. [c64-x25519#116](https://github.com/JC-000/c64-x25519/pull/116) built with `-D X25519_MAX_CLOCK_MHZ=64`; [c64-nist-curves#131](https://github.com/JC-000/c64-nist-curves/pull/131) inflated its byte-distance floor until each site tripped and got a **margin table** out of it, which then answered an open 64 MHz question that no other available method could.
+- **Mutation** — change the implementation so the property is false, and confirm the check reports. [c64-nist-curves#133](https://github.com/JC-000/c64-nist-curves/issues/133) proved its Q-validation tests vacuous this way: they passed unchanged against a mutated implementation.
+- **Poison-then-act** — write a sentinel into the output location, run the operation, assert the sentinel is gone. [c64-ChaCha20-Poly1305#93](https://github.com/JC-000/c64-ChaCha20-Poly1305/pull/93) wrote `$EE` into `aead_tag`, encrypted, and asserted, which turns "the tag is correct" into "the tag was *written*" — the property the suite had been silently assuming.
+
+**Where the cited evidence is an aggregate gate, the obligation applies per check within it, not to the gate as a whole.** An adopter cites `make check-archives`; the property a clause depends on is enforced by one leg of it. Without this scoping an adopter can say truthfully that its ratchet has been demonstrated to fail on the strength of one negative-tested leg while eleven others have never fired — which is the original defect wearing the gate's name.
+
+**A demonstration is scoped to the configuration it was performed in.** Where a check is relied on in a configuration it has not been exercised in — most commonly a **control arm**, which is by construction the configuration the instrument was built least to serve — the demonstration does not carry over, and the check SHOULD be exercised there before its result is treated as evidence.
+
+The motivating case is a hardware probe carrying a negative control, a detector positive control and a 36-check self-test, all green against the mitigated build it was developed on. Pointed at the **unmitigated control** — the one configuration the experiment turned on — it failed in four independent places before producing a single measurement. The fourth is the instructive one: a missing entry point resolved to the trampoline's own entry, so `jsr` on an absent routine presented as a 243-second boot and a **dead-REU timeout**. A tool defect wearing a hardware symptom, in the arm where the result would have been believed.
+
+A published domain bound (**§14.2**) — a ceiling or exclusion emitted as a symbol a consumer can reference, rather than described in prose — composes with this directly: once the edge is a named constant, "feed the bound, then feed bound+1" is a check whose failure mode is obvious.
+
+### 15.2 Failing is weaker evidence than failing for the right reason
+
+A negative build shows a check **can** report. It does not show that the check measures the property it names — a check can be made to fail by breaking something adjacent to what it is for. Where a technique can reproduce the original defect rather than merely break the check, prefer it, and say which was done.
+
+The reference instance is [c64-nist-curves#139](https://github.com/JC-000/c64-nist-curves/pull/139) (merged 2026-08-30, `92ef7bc`). Replacing the `jmp` in `fp_mod_inv`'s zero/modulus guard with `nop`s does not merely turn the suite red: it **re-exposes the original hang**, which the harness catches and recovers from, and the failing row names the input that hangs. That is a check demonstrated to report the thing it names, on the hardest sub-case — a defect that wedges the transport rather than returning a wrong value.
+
+### 15.3 Carrying a red for a defect that hangs
+
+A known-failing row for a defect that hangs or wedges the transport requires a harness that survives it; otherwise the first such row ends the run and the suite cannot carry it. Where the shared harness provides that capability, use it rather than reimplementing. `c64-nist-curves` built a per-case timeout → SP restore → trampoline re-arm → `PC` check mechanism in order to carry [#132](https://github.com/JC-000/c64-nist-curves/issues/132)'s red before the fix existed, then filed it upstream as [c64-test-harness#156](https://github.com/JC-000/c64-test-harness/issues/156).
+
+The sequencing matters and is worth copying: the red rows existed, tied to the open issue, *before* the guard landed — so the fix turned a documented failure green rather than arriving with a test written to agree with it.
+
+### 15.4 What this section does not require
+
+- **No suite-wide mutation testing.** The obligation is per-check, and only for checks cited as conformance evidence for a clause in this contract.
+- **No retroactive obligation.** An adopter conformant before this section landed is not out of conformance the moment it does.
+- **No preferred technique.** The three above are examples, not a closed list; a fourth that demonstrates the same thing is equally good.
+
+**Why this is a contract concern and not five repo concerns.** Over roughly twenty-four hours in August 2026, adversarial audits in four of the five adopter libraries each found checks that could not have failed, and in three cases those checks were the only thing standing between a real bug and a release ([#154](https://github.com/JC-000/c64-lib-contract/issues/154) has the six-row inventory). One shape, four libraries, independently: a check that is present, green, and structurally incapable of reporting the thing it names. The contract already depends on exactly this kind of check in five places, and had started demanding proof of it ad hoc, one clause at a time.
 
 ## 9. Compatibility timeline
 
@@ -1289,6 +1331,24 @@ See [adopters.md](adopters.md) for the status table and tracking issues per libr
 See [consumers.md](consumers.md) for the list of consumer projects relying on this contract.
 
 ## 12. Changelog
+
+### 0.17.0 — 2026-08-30
+
+Normative (MINOR): **§15 asks that a check offered as conformance evidence be shown capable of failing.** Not a new test framework — a statement about what counts as evidence. Filed as [#154](https://github.com/JC-000/c64-lib-contract/issues/154) after adversarial audits in **four of the five adopter libraries**, over roughly twenty-four hours, each found checks that could not have failed; in three cases those checks were the only thing between a real bug and a release. One shape, four libraries, arrived at independently: a check that is present, green, and structurally incapable of reporting the thing it names.
+
+The contract had already been asking for this piecemeal. §13.4 requires a conformance test to include a case where the device does not answer, because every "bounded" wait in the fleet had been unbounded on hardware since it was written and no run had ever produced `$89`. §8.2 (v0.14.1) asks that a structural settle be *asserted* rather than described, because no emulator reproduces the failure it guards. §6.6, §8.1 and §13.8 all rest on asserts. Five clauses reaching for the same idea locally is the case for stating it once.
+
+**SHOULD, not MUST, and no mandated technique.** Three are in fleet use and suit different check types: a **negative build** ([c64-x25519#116](https://github.com/JC-000/c64-x25519/pull/116)'s `-D X25519_MAX_CLOCK_MHZ=64`; [c64-nist-curves#131](https://github.com/JC-000/c64-nist-curves/pull/131) inflating its byte-distance floor until each site tripped — which produced a margin table that then answered an open 64 MHz question no other available method could reach); **mutation** ([c64-nist-curves#133](https://github.com/JC-000/c64-nist-curves/issues/133) proved its Q-validation tests vacuous by passing them against a mutated implementation); and **poison-then-act** ([c64-ChaCha20-Poly1305#93](https://github.com/JC-000/c64-ChaCha20-Poly1305/pull/93) wrote `$EE` into `aead_tag` before encrypting, turning "the tag is correct" into "the tag was *written*", which is what the suite had been silently assuming).
+
+**§15.2 is the part that was learned after the issue was filed, and it is the more useful half.** A negative build shows a check *can* report; it does not show the check measures the property it names — an objection an adopter raised against the original proposal and which was correct. [c64-nist-curves#139](https://github.com/JC-000/c64-nist-curves/pull/139) (`92ef7bc`) is the answer: replacing the `jmp` in `fp_mod_inv`'s zero/modulus guard with `nop`s does not merely turn the suite red, it **re-exposes the original hang**, which the harness catches and recovers from, and the failing row names the input that hangs. A check demonstrated to report the thing it names, on the hardest sub-case — a defect that wedges the transport rather than returning a wrong value.
+
+**§15.3 records the prerequisite and the sequencing.** Carrying a known-failing row for a hang needs a harness that survives it; `c64-nist-curves` built one to carry #132's red *before* the guard existed, then filed the mechanism upstream as [c64-test-harness#156](https://github.com/JC-000/c64-test-harness/issues/156). The clause says to use the shared capability rather than reimplement it, which is why the obligation is cheap: the first half of the work becomes an import. The sequencing is worth copying independently — the red rows existed and were tied to the open issue before the fix landed, so the fix turned a documented failure green instead of arriving with a test written to agree with it.
+
+A second adopter addition, raised on [#144](https://github.com/JC-000/c64-lib-contract/issues/144) and proposed on the PR rather than added on their behalf, scopes the demonstration itself: **a check shown capable of failing in one configuration is not thereby shown in another.** Their evidence is their own and unflattering — a hardware probe with three layers of self-check, all green, that broke in four independent places the first time it met the control arm, one of them presenting a tool defect as a dead device. The control arm is where an instrument is least exercised and most depended on, which is the combination worth naming.
+
+Adopter review of the draft added one sentence that changes what the clause catches: **the obligation applies per check within an aggregate gate, not to the gate as a whole.** The adopter raising it cites `make check-archives` — twelve archives plus legs for §1 identity, §4 placement, §5 value pins, §6.3 knob staleness, §6.5 gated surface, §8.2/§8.3 provider surfaces and a ZP alias audit — and reported that some legs have been negative-tested (knob staleness, the alias audit, the byte-distance settle asserts) while several §5 and §8.3 pins never have. Without the scoping sentence that library could have claimed the gate demonstrated-failing on the strength of one leg. It is the difference between the clause catching that situation and missing it, and it cost one sentence.
+
+Classified MINOR: new normative content, no existing clause, code, bit or equate altered. **Not retroactive**, and §15.4 says so: the obligation is per-check and only for checks cited as conformance evidence, there is no suite-wide mutation-testing requirement, and the three techniques are examples rather than a closed list.
 
 ### 0.16.0 — 2026-08-30
 
