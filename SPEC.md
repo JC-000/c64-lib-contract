@@ -19,7 +19,7 @@ The contract is deliberately minimal. It governs symbols and conventions, not im
 
 | Kind | Sections | Who reads it |
 |---|---|---|
-| **Core** — every library, every consumer | §1 versioning · §2 zero page · §3 REU layout · §4 segments · §5 manifests · §6 build-and-consume · §7 semver · §14 entry-point termination | everyone |
+| **Core** — every library, every consumer | §1 versioning · §2 zero page · §3 REU layout · §4 segments · §5 manifests · §6 build-and-consume · §7 semver · §14 entry-point termination · §15 conformance evidence | everyone |
 | **Domain** — only if the library implements that domain | §8 shared crypto primitives · §13 network backend ABI | crypto libraries: §8; network backends: §13 |
 | **Meta** — project state | §9 compatibility timeline · §10 adopters · §11 consumers · §12 changelog | reference as needed |
 
