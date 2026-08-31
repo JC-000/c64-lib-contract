@@ -399,6 +399,8 @@ LIB_SHARED_REU_MUL_BANKS_USED = (1 .shl LIB_SHARED_REU_MUL_BANK) | (1 .shl (LIB_
 
 Every adopter emits one `LIB_PRECALC_TABLE` invocation per precalculated table it ships, so duplication across adopters is detectable mechanically rather than by reading five repositories. The macro emits a `LIB_<X>_PRECALC_<name>_{SIZE,REGION,SHARED}` triple.
 
+**The macro's canonical source is [`precalc_table.inc`](precalc_table.inc) in this repository.** Adopters copy it verbatim — it carries its own `PRECALC_TABLE_INC_INCLUDED` guard so a consumer may include it once globally — and MUST NOT hand-edit their copy; a local change makes the cross-adopter audit compare things that are no longer the same macro. The region and sharing constants it defines:
+
 ```asm
 PRECALC_REGION_RAM     = $01
 PRECALC_REGION_REU     = $02
