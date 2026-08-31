@@ -16,6 +16,18 @@ Every adopter citation to a retired section resolves there permanently. Survivin
 | **§14** | Entry-point termination and documented domain | Its MUST was discharged by its first limb for any terminating entry point, so it could not reach the preconditions its own rationale cited. The fix it named as its flagship case landed 26 hours before the clause existed. | §5 — publish a bound as a referenceable symbol (§14.2's one crossing sentence) |
 | **§15** | Conformance evidence | SHOULD-level and non-retroactive. Every defect it existed to prevent had already been found and fixed by the audits that motivated it. | — |
 
+## Existing conformance records stay valid
+
+**A conformance record that cites a retired section remains valid at the tag it cites, and does not need restating against the post-1.0 document.** A record like "conformant with §14 at `v0.16.0`" is a claim about a specific tagged revision, which is what tag-pinning is for; the retirement does not falsify it and does not create work. Adopters should leave such records as they are.
+
+The same holds for source comments and design docs: a citation to a retired section is a citation to `v0.17.1`, and `git show v0.17.1:SPEC.md` resolves it. Rewriting them would be churn with no reader benefit.
+
+## Where the retired reasoning went
+
+The retired sections are not repudiated — they are out of scope for a contract, which is a narrower claim. §14's termination reasoning and §15's "a check offered as evidence should be shown capable of failing" both remain readable, unchanged, at `v0.17.1`, and a library that finds them useful should keep applying them locally.
+
+§15 in particular produced real findings in the hours it was in force — a per-check evidence inventory across four libraries, which surfaced defects that had survived ordinary review. That the idea works is not in dispute. What the two-prong rule says is that a shared normative clause was the wrong instrument for it: the property it governs is visible to the owning repository's own audit, which is how every one of those defects was actually found. **Keep the practice; do not keep it as an obligation this contract imposes.**
+
 ## The rule applied
 
 A clause belongs in `SPEC.md` only if it governs **(1) a name, value or placement that two independently-built artifacts must agree on, where (2) a violation is invisible from inside any single repository's own build.** Both prongs are required.
