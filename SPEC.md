@@ -382,7 +382,7 @@ LIB_SHARED_REU_MUL_BANKS_USED = (1 .shl LIB_SHARED_REU_MUL_BANK) | (1 .shl (LIB_
 
 `LIB_SHARED_REU_MUL_BANKS_USED` names both claimed banks as one mask; a library ORs it into its own exported `LIB_<X>_REU_BANKS_USED` (§5), which is what consumers compose.
 
-**Export discipline.** Every `LIB_SHARED_REU_MUL_*` equate above is consumer input or derived from it, and libraries MUST NOT `.export` any of them. What a consuming library MUST export instead is its library-prefixed *output* counterparts — `LIB_<X>_SHARED_REU_MUL_BANK`, `_OFFSET`, `_BANKS_USED`, `_STAGE_LO`, `_STAGE_HI` — so a consumer can verify co-linked libraries agree on placement.
+**Export discipline.** Every `LIB_SHARED_REU_MUL_*` equate above is consumer input or derived from it, and libraries MUST NOT `.export` any of them. What a consuming library MUST export instead is its library-prefixed *output* counterparts — `LIB_<X>_SHARED_REU_MUL_BANK`, `_OFFSET`, `_BANKS_USED` — so a consumer can verify co-linked libraries agree on placement. A library that honours the staging knobs SHOULD also export `LIB_<X>_SHARED_REU_MUL_STAGE_LO` / `_STAGE_HI`, same shape.
 
 **The exported value MUST be the value the code reads.** An export whose value the library's REU access paths do not actually consume certifies nothing.
 

@@ -8,7 +8,7 @@ This repo specifies the contract that lets libraries publish their version, ZP s
 
 ## Status
 
-**v1.0.0 (2026-08-31).** The contract was cut from 40,737 words to 5,141 — an 87% reduction — and is now stable.
+**v1.0.0 (2026-08-31).** The contract was cut from 40,737 words to 5,154 — an 87% reduction — and is now stable.
 
 **No symbol, equate, bit value, segment name, build target or error code changed.** A library conformant at v0.17.1 is conformant at v1.0.0 without edits. What went was rationale, incident history and process regulation: §9, §12, §13, §14 and §15, and sub-clauses §6.3, §6.6 and §6.7, are retired. Surviving sections keep their original numbers, so existing citations still resolve; see [RETIRED.md](RETIRED.md) for where the removed text lives (tag `v0.17.1`, permanently) and [CHANGELOG.md](CHANGELOG.md) for the release history that used to be §12.
 
