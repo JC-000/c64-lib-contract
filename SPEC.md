@@ -227,7 +227,7 @@ A library's build MUST accept consumer-supplied ca65 defines and pass them to ev
 
 They are separate because a consumer overriding a ZP slot and a consumer relocating an REU table are different operations with different blast radii, and a single variable makes it impossible to pass one without restating the other.
 
-**Both MUST reach every translation unit the archive contains**, not only the ones the library's own tests exercise. A `-D` that reaches some TUs and not others produces an archive whose members disagree about a shared address, which links cleanly and fails at runtime. This is invisible from inside the library's own build, because the library's defaults are self-consistent; it appears only once a consumer overrides something.
+`CONTRACT_DEFINES` MUST reach every translation unit the archive contains. `CONTRACT_ZP_DEFINES` MUST reach every translation unit that defines a slot and MUST NOT reach any translation unit that `.importzp`s it — a `-D` of an imported name is `Symbol already defined`. A `-D` that reaches some defining TUs and not others produces an archive whose members disagree about an address, which links cleanly and fails at runtime; the library's own build cannot see this because its defaults are self-consistent.
 
 ### 6.4 The manifest describes the archive it ships in
 
@@ -245,8 +245,6 @@ A deprecated alias MUST be gated by `LIB_NO_BARE_EXPORTS` wherever the old name 
 - **MINOR** — additive (new symbols, new build targets, new manifest equates, new variants).
 - **PATCH** — bug fix only, no ABI surface change.
 - **`LIB_<X>_ABI_VERSION`** is not derived from MAJOR (§1). The consumer-side gate `.assert LIB_<X>_ABI_VERSION = <expected>, lderror, "..."` is the load-bearing breakage check — `.assert`/`lderror`, never `.if`/`.error`.
-
-**Whether a change is breaking is decided by one question: can a consumer that was conforming before the change be broken by it?** A widened return set breaks an exhaustive comparison, so it is breaking. Correcting documentation to match unchanged code is not — a consumer relying on the wrong documented contract was already broken, and the correction discloses that rather than causing it. Such a correction owes a prominent release note, not a counter bump.
 
 Breaking changes go through a one-MINOR-release deprecation cycle.
 

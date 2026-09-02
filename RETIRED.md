@@ -8,7 +8,7 @@ Every adopter citation to a retired section resolves there permanently. Survivin
 
 | Retired | Was | Why it went | Where the obligation lives now |
 |---|---|---|---|
-| **§6.3** | Every contemplated configuration is reachable | Build-system hygiene for five Makefiles. Its one consumer-visible protection — no `ar65` member surgery — is in §6.1, which survives. The rest failed at the adopter's own build. | §6.1 (surgery ban); §6.2 (defines must reach every TU) |
+| **§6.3** | Every contemplated configuration is reachable | Build-system hygiene for five Makefiles. Its one consumer-visible protection — no `ar65` member surgery — is in §6.1, which survives. The rest failed at the adopter's own build. | §6.1 (surgery ban); §6.2 (the define-scoping rule) |
 | **§6.6** | Consumer footprint asserts | A `RECOMMENDED` snippet the consumer writes in their own tree. Deleting it deleted a suggestion. | §5 — footprint equates MUST be safe-direction, and RESIDENT/COLD are a pair |
 | **§6.7** | Declared non-segment reservations | The guard TU ships in no archive, so nothing it asserts crosses a library boundary. | §4 (declare load-bearing cfg attributes); §8.1 (sqtab page-alignment assert) |
 | **§9** | Compatibility timeline | A narrative of the contract's own growth. | CHANGELOG.md |
