@@ -25,7 +25,7 @@ Contract [v0.7.0](CHANGELOG.md) resolved [#43](https://github.com/JC-000/c64-lib
 2. **§5** — move the aggregate manifest equates out of `src/lib_version.s` into `src/lib_manifest.s`, so importing one cannot drag the bare §1 names into the link.
 3. **§8.4** — refresh `src/precalc_table.inc` from this repo's canonical root copy and pass the library prefix as the fifth `LIB_PRECALC_TABLE` argument.
 
-The bare names remain **required** and their removal is deferred to a future MAJOR (SPEC §1), so nothing breaks while this wave lands. Until a given library ships it, a consumer composing that library with another still falls back to the §8.0 `od65` out-of-band pattern for it — noting per v0.7.2 that `od65` reads objects, not archives.
+The bare names remain **required** and their removal is deferred to a future MAJOR (SPEC §1), so nothing breaks while this wave lands. Until a given library ships it, a consumer composing that library with another still relies on an out-of-band `od65 --dump-exports` check for it — noting per v0.7.2 that `od65` reads objects, not archives.
 
 Status verified against each library's default branch and its newest tag on 2026-08-13. **Three of four have landed it on `main` — and none of the three is in a tag:**
 

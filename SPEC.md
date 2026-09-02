@@ -194,7 +194,7 @@ Every library MUST export the following four integer equates, from `src/lib_mani
 | Symbol | Semantics |
 |---|---|
 | `LIB_<X>_ZP_USAGE_BYTES` | Total bytes of ZP slots claimed (sum of all `.exportzp` slots). |
-| `LIB_<X>_REU_BANKS_USED` | Bitmask of REU banks claimed (§3). Zero if no REU. |
+| `LIB_<X>_REU_BANKS_USED` | Bitmask of REU banks claimed (§3): bit *n* = bank *n*, banks 0–31. Zero if no REU. |
 | `LIB_<X>_RESIDENT_BYTES` | Code+rodata footprint that remains CPU-resident in every consumer. |
 | `LIB_<X>_COLD_BYTES` | Code+rodata footprint a consumer MAY overlay-page (load on demand from REU, kernal-banked RAM or storage). |
 
@@ -367,15 +367,28 @@ LIB_SHARED_REU_MUL_BANKS_USED = (1 .shl LIB_SHARED_REU_MUL_BANK) | (1 .shl (LIB_
 .assert LIB_SHARED_REU_MUL_BANK < 31,      error, "reu_mul base bank must leave room for the hi-half bank at base+1 inside the 32-bit §5 bank mask"
 ```
 
+**Staging buffer.** The fetch lands each row in a page-aligned pair of 256-byte buffers the consumer may place:
+
+```asm
+.ifndef LIB_SHARED_REU_MUL_STAGE_LO
+    LIB_SHARED_REU_MUL_STAGE_LO = $....   ; 256 B page-aligned, lo half of fetched row
+.endif
+.ifndef LIB_SHARED_REU_MUL_STAGE_HI
+    LIB_SHARED_REU_MUL_STAGE_HI = $....   ; 256 B page-aligned, hi half of fetched row
+.endif
+.assert (LIB_SHARED_REU_MUL_STAGE_LO & $00ff) = 0,                         error, "reu_mul stage_lo must be page-aligned"
+.assert LIB_SHARED_REU_MUL_STAGE_HI = LIB_SHARED_REU_MUL_STAGE_LO + $0100, error, "reu_mul stage_hi must follow stage_lo by $0100"
+```
+
 `LIB_SHARED_REU_MUL_BANKS_USED` names both claimed banks as one mask; a library ORs it into its own exported `LIB_<X>_REU_BANKS_USED` (§5), which is what consumers compose.
 
-**Export discipline.** Every `LIB_SHARED_REU_MUL_*` equate above is consumer input or derived from it, and libraries MUST NOT `.export` any of them. What a consuming library MUST export instead is its library-prefixed *output* counterparts — `LIB_<X>_SHARED_REU_MUL_BANK`, `_OFFSET`, `_BANKS_USED` — so a consumer can verify co-linked libraries agree on placement.
+**Export discipline.** Every `LIB_SHARED_REU_MUL_*` equate above is consumer input or derived from it, and libraries MUST NOT `.export` any of them. What a consuming library MUST export instead is its library-prefixed *output* counterparts — `LIB_<X>_SHARED_REU_MUL_BANK`, `_OFFSET`, `_BANKS_USED`, `_STAGE_LO`, `_STAGE_HI` — so a consumer can verify co-linked libraries agree on placement.
 
 **The exported value MUST be the value the code reads.** An export whose value the library's REU access paths do not actually consume certifies nothing.
 
 **Init.** The canonical entry point is `reu_mul_tables_init`.
 
-**Fetch.** The canonical per-row entry point is `reu_fetch_mul_row`; `A = a` (row index) on entry, and on return the 512 bytes of row `a` are in the staging buffer.
+**Fetch.** The canonical per-row entry point is `reu_fetch_mul_row`; `A = a` (row index) on entry, and on return the 512 bytes of row `a` are at `LIB_SHARED_REU_MUL_STAGE_LO` / `LIB_SHARED_REU_MUL_STAGE_HI`.
 
 **DMA completion and settle (normative).** After every REU execute, the library MUST (a) confirm completion via the `$DF00` status bit before the next REU register access, and (b) observe a post-execute settle before that access. A settle met by intervening code is conformant.
 
@@ -397,7 +410,7 @@ LIB_SHARED_REU_MUL_BANKS_USED = (1 .shl LIB_SHARED_REU_MUL_BANK) | (1 .shl (LIB_
 
 ### 8.4 Precalc-table enumeration
 
-Every adopter emits one `LIB_PRECALC_TABLE` invocation per precalculated table it ships of 256 bytes or more that is REU-resident, read in a per-byte or per-row inner loop, or page-aligned for fetch alignment, so duplication across adopters is detectable mechanically rather than by reading five repositories; smaller or incidental tables are exempt. The macro emits `LIB_<X>_PRECALC_<name>_{SIZE,REGION,SHARED}` when the library argument is given, and additionally the unprefixed `LIB_PRECALC_<name>_*` triple unless `LIB_NO_BARE_EXPORTS` is defined.
+Every adopter emits one `LIB_PRECALC_TABLE` invocation per precalculated table it ships of 256 bytes or more that is REU-resident, read in a per-byte or per-row inner loop, or page-aligned for fetch alignment, so duplication across adopters is detectable mechanically rather than by reading five repositories; smaller or incidental tables are exempt. The macro emits `LIB_<X>_PRECALC_<name>_{SIZE,REGION,SHARED}` when the library argument is given, and additionally the unprefixed `LIB_PRECALC_<name>_*` triple unless `LIB_NO_BARE_EXPORTS` is defined; a blank library argument while `LIB_NO_BARE_EXPORTS` is defined is an assemble-time error, since the invocation would emit nothing.
 
 **The macro's canonical source is [`precalc_table.inc`](precalc_table.inc) in this repository.** Adopters copy it verbatim — it carries its own `PRECALC_TABLE_INC_INCLUDED` guard so a consumer may include it once globally — and MUST NOT hand-edit their copy; a local change makes the cross-adopter audit compare things that are no longer the same macro. The region and sharing constants it defines:
 
@@ -416,7 +429,7 @@ LIB_PRECALC_TABLE "lim_lee_comb", 24576,  PRECALC_REGION_REU,    PRECALC_SHARED_
 
 The exports carry the `: abs` hint for the same reason as §1's. Adopters sharing a table MUST agree on its name, size and region — an asymmetry between two adopters describing the same table is the signal this enumeration exists to surface. The macro MUST be included from a single translation unit (§1's TU-isolation rule).
 
-**Zero-consumer carve-out.** The bare `LIB_PRECALC_<name>_*` triple exists for the same reason as §1's bare version exports, and the same carve-out applies: a library with no released consumers SHOULD NOT emit it, which it does by defining `LIB_NO_BARE_EXPORTS` in the enumerating TU.
+**Zero-consumer carve-out.** The bare `LIB_PRECALC_<name>_*` triple exists for the same reason as §1's bare version exports, and the same carve-out applies: a library with no released consumers SHOULD NOT emit it, which it does by defining `LIB_NO_BARE_EXPORTS` in the enumerating TU, `.ifndef`-guarded so a consumer's build-wide `-D` is not a redefinition.
 
 ## 10. Adopters
 
