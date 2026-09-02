@@ -19,7 +19,7 @@ This contract lets several independently-maintained 6502/ca65 libraries be linke
 | **Domain** — only if the library implements that domain | §8 shared primitives | crypto libraries |
 | **Meta** | §10 adopters · §11 consumers | reference as needed |
 
-RFC 2119 keywords (MUST, MUST NOT, SHOULD, MAY) carry their usual meaning.
+RFC 2119 keywords carry their usual meaning.
 
 ## 1. Version identification
 
@@ -149,7 +149,7 @@ If a library uses any 17xx-series REU banks for precompute tables or scratch, ev
 
 Consumers MAY relocate any library's REU base via `-D` to resolve a collision.
 
-**A header that `.import`s an overridable equate MUST guard the import.** A `-D` reaching a translation unit that also `.import`s the name is `Symbol already defined`, so the documented override fails to assemble against the library's own header. Guard the `.import` with `.ifndef` **iff** the defining TU guards the definition, and pair every such guard with an `.else` branch asserting the override against the library's exported value — a bare guard alone converts a compile error into silent divergence, letting a consumer at one bank link cleanly against an archive built for another. Where the defining TU assigns unconditionally the equate is derived, so leave the import bare and let the `-D` collide loudly.
+**A consumer-facing header (`.inc`) that `.import`s an overridable equate MUST guard the import.** A `-D` reaching a translation unit that also `.import`s the name is `Symbol already defined`, so the documented override fails to assemble against the library's own header. Guard the `.import` with `.ifndef` **iff** the defining TU guards the definition, and pair every such guard with an `.else` branch asserting the override against the library's exported value — a bare guard alone converts a compile error into silent divergence, letting a consumer at one bank link cleanly against an archive built for another. Where the defining TU assigns unconditionally the equate is derived, so leave the import bare and let the `-D` collide loudly.
 
 ## 4. Segment naming
 
@@ -195,7 +195,7 @@ Every library MUST export the following four integer equates, from `src/lib_mani
 |---|---|
 | `LIB_<X>_ZP_USAGE_BYTES` | Total bytes of ZP slots claimed (sum of all `.exportzp` slots). |
 | `LIB_<X>_REU_BANKS_USED` | Bitmask of REU banks claimed (§3). Zero if no REU. |
-| `LIB_<X>_RESIDENT_BYTES` | Code+rodata footprint that must remain CPU-resident in any consumer. |
+| `LIB_<X>_RESIDENT_BYTES` | Code+rodata footprint that remains CPU-resident in every consumer. |
 | `LIB_<X>_COLD_BYTES` | Code+rodata footprint a consumer MAY overlay-page (load on demand from REU, kernal-banked RAM or storage). |
 
 Libraries consuming one or more §8 shared primitives MUST additionally export `LIB_<X>_SHARED_PRIMITIVES` (ownership) and `LIB_<X>_SHARED_CONSUMES` (consumption) bitmasks, ORed from the per-primitive bit constants in each §8.x sub-clause. See §8.0 for the allocation table, the build-config state definitions and both masks' required construction forms.
@@ -285,7 +285,7 @@ Both sides of the link carry the values, and only exported symbols collide. The 
 | State | `SHARED_PRIMITIVES` bit | `SHARED_CONSUMES` bit | Obligations |
 |---|---|---|---|
 | **owner** | set | set | Exports the primitive's init/body per its §8.x clause. |
-| **deferring consumer** | clear | set | The deferral switch is defined. The build still reads the primitive at runtime: it retains the consumption surface (placement equates, §3 REU bank claims), the composed link MUST contain exactly one owner, and boot MUST initialise the primitive before first use. |
+| **deferring consumer** | clear | set | The deferral switch is defined. The build still reads the primitive at runtime: it retains the consumption surface (placement equates, §3 REU bank claims), relies on exactly one owner being present in the composed link (the consumer's coverage assert below), and on the primitive being initialised before first use. |
 | **non-consumer** | clear | clear | The placement/precalc export surface is absent, no aggregate claim is made, no provider obligation exists. |
 
 **Mask construction (required form).** Build the ownership mask so a defined switch drops the bit — do **not** OR the bit constants unconditionally. An unconditional mask makes the consumer's disjointness assert unsatisfiable for any legitimately shared primitive, because both sharers keep the bit:
@@ -364,14 +364,16 @@ LIB_PRECALC_TABLE "sqtab", 1024, PRECALC_REGION_RAM, PRECALC_SHARED_YES, "<X>"
 LIB_SHARED_REU_MUL_BANKS_USED = (1 .shl LIB_SHARED_REU_MUL_BANK) | (1 .shl (LIB_SHARED_REU_MUL_BANK + 1))
 
 .assert LIB_SHARED_REU_MUL_OFFSET = $0000, error, "reu_mul must start at offset 0 within its bank pair"
-.assert LIB_SHARED_REU_MUL_BANK < $FE,     error, "reu_mul base bank must leave room for the hi-half bank at base+1"
+.assert LIB_SHARED_REU_MUL_BANK < 31,      error, "reu_mul base bank must leave room for the hi-half bank at base+1 inside the 32-bit §5 bank mask"
 ```
 
-`LIB_SHARED_REU_MUL_BANKS_USED` names both claimed banks as one mask; libraries OR it into their own `LIB_<X>_REU_BANKS_USED` (§5), and consumers compose it into their REU budget assert rather than rewriting the shift expression at each site.
+`LIB_SHARED_REU_MUL_BANKS_USED` names both claimed banks as one mask; a library ORs it into its own exported `LIB_<X>_REU_BANKS_USED` (§5), which is what consumers compose.
 
-**Export discipline.** Every `LIB_SHARED_REU_MUL_*` equate above is consumer input or derived from it, and libraries MUST NOT `.export` any of them. What a consuming library MUST export instead is its library-prefixed *output* counterparts — `LIB_<X>_SHARED_REU_MUL_BANK`, `_OFFSET`, `_BANKS_USED` — so a consumer can verify co-linked libraries agree on placement. Libraries honouring the ZP/staging knobs — `LIB_SHARED_REU_MUL_ZP_INIT_A`, `LIB_SHARED_REU_MUL_ZP_INIT_B`, `LIB_SHARED_REU_MUL_STAGE_LO`, `LIB_SHARED_REU_MUL_STAGE_HI` — SHOULD export prefixed counterparts of those too.
+**Export discipline.** Every `LIB_SHARED_REU_MUL_*` equate above is consumer input or derived from it, and libraries MUST NOT `.export` any of them. What a consuming library MUST export instead is its library-prefixed *output* counterparts — `LIB_<X>_SHARED_REU_MUL_BANK`, `_OFFSET`, `_BANKS_USED` — so a consumer can verify co-linked libraries agree on placement.
 
 **The exported value MUST be the value the code reads.** An export whose value the library's REU access paths do not actually consume certifies nothing.
+
+**Init.** The canonical entry point is `reu_mul_tables_init`.
 
 **Fetch.** The canonical per-row entry point is `reu_fetch_mul_row`; `A = a` (row index) on entry, and on return the 512 bytes of row `a` are in the staging buffer.
 
@@ -395,7 +397,7 @@ LIB_SHARED_REU_MUL_BANKS_USED = (1 .shl LIB_SHARED_REU_MUL_BANK) | (1 .shl (LIB_
 
 ### 8.4 Precalc-table enumeration
 
-Every adopter emits one `LIB_PRECALC_TABLE` invocation per precalculated table it ships, so duplication across adopters is detectable mechanically rather than by reading five repositories. The macro emits a `LIB_<X>_PRECALC_<name>_{SIZE,REGION,SHARED}` triple.
+Every adopter emits one `LIB_PRECALC_TABLE` invocation per precalculated table it ships of 256 bytes or more that is REU-resident, read in a per-byte or per-row inner loop, or page-aligned for fetch alignment, so duplication across adopters is detectable mechanically rather than by reading five repositories; smaller or incidental tables are exempt. The macro emits `LIB_<X>_PRECALC_<name>_{SIZE,REGION,SHARED}` when the library argument is given, and additionally the unprefixed `LIB_PRECALC_<name>_*` triple unless `LIB_NO_BARE_EXPORTS` is defined.
 
 **The macro's canonical source is [`precalc_table.inc`](precalc_table.inc) in this repository.** Adopters copy it verbatim — it carries its own `PRECALC_TABLE_INC_INCLUDED` guard so a consumer may include it once globally — and MUST NOT hand-edit their copy; a local change makes the cross-adopter audit compare things that are no longer the same macro. The region and sharing constants it defines:
 
@@ -414,7 +416,7 @@ LIB_PRECALC_TABLE "lim_lee_comb", 24576,  PRECALC_REGION_REU,    PRECALC_SHARED_
 
 The exports carry the `: abs` hint for the same reason as §1's. Adopters sharing a table MUST agree on its name, size and region — an asymmetry between two adopters describing the same table is the signal this enumeration exists to surface. The macro MUST be included from a single translation unit (§1's TU-isolation rule).
 
-**Zero-consumer carve-out.** The bare `LIB_PRECALC_<name>_*` triple exists for the same reason as §1's bare version exports, and the same carve-out applies: a library with no released consumers SHOULD NOT emit it.
+**Zero-consumer carve-out.** The bare `LIB_PRECALC_<name>_*` triple exists for the same reason as §1's bare version exports, and the same carve-out applies: a library with no released consumers SHOULD NOT emit it, which it does by defining `LIB_NO_BARE_EXPORTS` in the enumerating TU.
 
 ## 10. Adopters
 

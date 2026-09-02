@@ -8,7 +8,7 @@ This repo specifies the contract that lets libraries publish their version, ZP s
 
 ## Status
 
-**v1.0.0 (2026-08-31).** The contract was cut from roughly 40,000 words to about 7,300 — an 82% reduction — and is now stable.
+**v1.0.0 (2026-08-31).** The contract was cut from 40,737 words to 5,028 — an 88% reduction — and is now stable.
 
 **No symbol, equate, bit value, segment name, build target or error code changed.** A library conformant at v0.17.1 is conformant at v1.0.0 without edits. What went was rationale, incident history and process regulation: §9, §12, §13, §14 and §15, and sub-clauses §6.3, §6.6 and §6.7, are retired. Surviving sections keep their original numbers, so existing citations still resolve; see [RETIRED.md](RETIRED.md) for where the removed text lives (tag `v0.17.1`, permanently) and [CHANGELOG.md](CHANGELOG.md) for the release history that used to be §12.
 
@@ -19,13 +19,13 @@ This repo specifies the contract that lets libraries publish their version, ZP s
 - [**SPEC.md**](SPEC.md) — the contract itself: version equates, `.exportzp` ZP slots, REU bank symbols, segment naming, aggregate manifest equates, build-target conventions, shared-primitive promotion clauses.
 - [**adopters.md**](adopters.md) — libraries that follow (or are in the process of following) the contract, with tracking-issue links per section.
 - [**consumers.md**](consumers.md) — downstream projects that rely on the contract.
-- [**precalc_table.inc**](precalc_table.inc) + [**examples/precalc_table_smoke.s**](examples/precalc_table_smoke.s) + [**Makefile**](Makefile) — canonical ca65 source for the SPEC §8.0 catch-loop `LIB_PRECALC_TABLE` macro, smoke-tested via `make verify` (requires `ca65` from the cc65 toolchain).
+- [**precalc_table.inc**](precalc_table.inc) + [**examples/precalc_table_smoke.s**](examples/precalc_table_smoke.s) + [**Makefile**](Makefile) — canonical ca65 source for the SPEC §8.4 `LIB_PRECALC_TABLE` macro, smoke-tested via `make verify` (requires `ca65` from the cc65 toolchain).
 
 ## How to participate
 
 - **Library authors**: read SPEC.md, open a PR adding your library to `adopters.md`, file tracking issues against your library for each unimplemented section. Cross-link to this repo from your library's README so consumers can find the contract.
 - **Consumer authors**: read SPEC.md, open a PR adding your project to `consumers.md`, link to your project's library-ingestion docs. If you need new contract sections (e.g., your consumer requires a property no current library exposes), open a PR against SPEC.md with the proposed addition + rationale.
-- **Contract changes**: open a PR with the change + rationale. v1.0 will gate breaking changes behind a deprecation cycle (currently in draft, breaking changes are still cheap).
+- **Contract changes**: open a PR with the change + rationale. Breaking changes go through the SPEC §7 deprecation cycle.
 
 ## Acknowledgments
 
