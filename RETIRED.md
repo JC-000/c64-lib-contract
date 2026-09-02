@@ -12,6 +12,7 @@ Every adopter citation to a retired section resolves there permanently. Survivin
 | **§6.6** | Consumer footprint asserts | A `RECOMMENDED` snippet the consumer writes in their own tree. Deleting it deleted a suggestion. | §5 — footprint equates MUST be safe-direction, and RESIDENT/COLD are a pair |
 | **§6.7** | Declared non-segment reservations | The guard TU ships in no archive, so nothing it asserts crosses a library boundary. | §4 (declare load-bearing cfg attributes); §8.1 (sqtab page-alignment assert) |
 | **§9** | Compatibility timeline | A narrative of the contract's own growth. | CHANGELOG.md |
+| **§13** | Network backend ABI | Every network backend is source in its consumer's own tree, compiled by that consumer's Makefile into its own binary — never an archive another repository links — so there are not two independently-built artifacts (prong 1), and a violation is visible from inside the owning repository's build (prong 2). The two consumers' backend copies have already diverged, and each consumer's `net_families.inc` declares itself canonical. | The consumer repositories' own `net_abi.inc` / `net_families.inc` / `net_caps.inc` headers, which already declare themselves canonical; the v0.17.1 text for the prose |
 | **§12** | Changelog | 34% of the document, and a second codebase: it required correct-forward releases to fix its account of earlier ones. | CHANGELOG.md, terse |
 | **§14** | Entry-point termination and documented domain | Its MUST was discharged by its first limb for any terminating entry point, so it could not reach the preconditions its own rationale cited. The fix it named as its flagship case landed 26 hours before the clause existed. | §5 — publish a bound as a referenceable symbol (§14.2's one crossing sentence) |
 | **§15** | Conformance evidence | SHOULD-level and non-retroactive. Every defect it existed to prevent had already been found and fixed by the audits that motivated it. | — |
@@ -34,7 +35,7 @@ A clause belongs in `SPEC.md` only if it governs **(1) a name, value or placemen
 
 Each retirement above fails at least one prong. §6.7's guard crosses no boundary (prong 1). §14 and §15 govern properties of a single routine or a single repository's test suite, each visible to the owning repo's own audit (prong 2) — which is how both were found, before either clause existed.
 
-The rule keeps what it should: §2's ZP registry passes both — a slot name is linker-visible, agreement is mandatory, and three adopters independently converged on the same bare names while each built green alone. §13 and §8 likewise: one error code meant two things in two repos, each internally consistent, and neither visible from inside one.
+The rule keeps what it should: §2's ZP registry passes both — a slot name is linker-visible, agreement is mandatory, and three adopters independently converged on the same bare names while each built green alone. §8 likewise: two adopters (`c64-x25519` and `c64-ChaCha20-Poly1305`) each exported the §8.0 bit constants, each built green alone, and the composed link failed with `Duplicate external identifier` ([#55](https://github.com/JC-000/c64-lib-contract/issues/55), [#56](https://github.com/JC-000/c64-lib-contract/issues/56)).
 
 ## If you are re-proposing one of these
 

@@ -2,6 +2,9 @@
 
 This page tracks downstream projects that rely on the [c64-lib-contract](SPEC.md). Each row links to the consumer's lead architecture / ingestion doc.
 
+> Cells below may cite sections retired at contract v1.0.0 (§6.3, §6.6, §6.7, §9, §12, §13, §14, §15). They are kept as the record of what shipped when;
+> the cited text lives at tag `v0.17.1` — see [RETIRED.md](RETIRED.md).
+
 ## Consumer status
 
 | Project | Status | Lead doc |

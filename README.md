@@ -10,7 +10,7 @@ This repo specifies the contract that lets libraries publish their version, ZP s
 
 **v1.0.0 (2026-08-31).** The contract was cut from roughly 40,000 words to about 7,300 — an 82% reduction — and is now stable.
 
-**No symbol, equate, bit value, segment name, build target or error code changed.** A library conformant at v0.17.1 is conformant at v1.0.0 without edits. What went was rationale, incident history and process regulation: §9, §12, §14 and §15, and sub-clauses §6.3, §6.6 and §6.7, are retired. Surviving sections keep their original numbers, so existing citations still resolve; see [RETIRED.md](RETIRED.md) for where the removed text lives (tag `v0.17.1`, permanently) and [CHANGELOG.md](CHANGELOG.md) for the release history that used to be §12.
+**No symbol, equate, bit value, segment name, build target or error code changed.** A library conformant at v0.17.1 is conformant at v1.0.0 without edits. What went was rationale, incident history and process regulation: §9, §12, §13, §14 and §15, and sub-clauses §6.3, §6.6 and §6.7, are retired. Surviving sections keep their original numbers, so existing citations still resolve; see [RETIRED.md](RETIRED.md) for where the removed text lives (tag `v0.17.1`, permanently) and [CHANGELOG.md](CHANGELOG.md) for the release history that used to be §12.
 
 **The rule the contract is now held to:** a clause belongs in `SPEC.md` only if it governs **(1) a name, value or placement that two independently-built artifacts must agree on, where (2) a violation is invisible from inside any single repository's own build.** Both prongs are required. Anything failing either belongs in a library's own source comments, tests or issue tracker. Re-proposals should say which prong they pass.
 
