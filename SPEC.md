@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 1.0.0 (2026-09-03)
+**Version:** 1.1.0 (2026-09-03)
 **Status:** Stable.
 
 **Referencing a version.** Every version is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming.
@@ -36,7 +36,7 @@ They live in a dedicated file, conventionally `src/lib_version.s`, exported with
 
 **The `: abs` hint is required, not decorative.** These are small integers, so ca65 infers **zeropage** without it while a consumer's `.import` defaults to absolute — producing `ld65: Warning: Address size mismatch` at every import site.
 
-**`LIB_<X>_ABI_VERSION` is independent of MAJOR.** It is a generation counter for the exported surface, not a mirror of the semantic version, and it increments on any breaking export change — a removed or renamed symbol, a changed calling convention, a changed memory model. It cannot track MAJOR, because a library may break its surface on a MINOR bump while pre-1.0, leaving MAJOR at `0` carrying no signal. A consumer gating on the counter would then never fire for exactly the changes the gate exists to catch.
+**`LIB_<X>_ABI_VERSION` is independent of MAJOR.** It is a generation counter for the exported surface, not a mirror of the semantic version, and it increments on any breaking export change — a removed or renamed symbol, a changed calling convention, a changed memory model. It cannot track MAJOR, because a library may break its surface on a MINOR bump while pre-1.0, leaving MAJOR at `0` carrying no signal. A consumer gating on the counter would then never fire for exactly the changes the gate exists to catch. §7 says when a change to an exported symbol's contract moves the counter even though the export list did not change.
 
 **TU isolation (required).** The deprecated bare exports below MUST live in a translation unit that exports nothing else — no §5 manifest equates, no §8.4 table equates, no code. ld65 pulls in whole object members: if the bare names share a member with anything a consumer legitimately imports, they enter the link uninvited and collide even when the consumer never referenced them. §5's aggregate equates therefore live in `src/lib_manifest.s`.
 
@@ -245,6 +245,8 @@ A deprecated alias MUST be gated by `LIB_NO_BARE_EXPORTS` wherever the old name 
 - **MINOR** — additive (new symbols, new build targets, new manifest equates, new variants).
 - **PATCH** — bug fix only, no ABI surface change.
 - **`LIB_<X>_ABI_VERSION`** is not derived from MAJOR (§1). The consumer-side gate `.assert LIB_<X>_ABI_VERSION = <expected>, lderror, "..."` is the load-bearing breakage check — `.assert`/`lderror`, never `.if`/`.error`.
+
+**Whether the counter moves turns on what the code does, not on whether the export list changed.** It moves when a consumer conforming to the previously documented contract can be broken by the change — most often when an existing entry point's actual return set gains a value, since exhaustive handling silently becomes non-exhaustive. It holds when behaviour that was previously undocumented becomes documented, and when documentation is corrected to match code that did not change: a consumer relying on the wrong documented contract was already broken at every prior release, so the correction discloses that rather than causing it. This clause governs `LIB_<X>_ABI_VERSION` only. Such a change is not thereby MAJOR under the first bullet above, nor subject to the deprecation cycle below.
 
 Breaking changes go through a one-MINOR-release deprecation cycle.
 
