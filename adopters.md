@@ -5,6 +5,20 @@ This page tracks which libraries adopt (or are in the process of adopting) the [
 > Contract is at **v1.2.1**. Cells below may cite sections retired at contract v1.0.0 (§6.3, §6.6, §6.7, §9, §12, §13, §14, §15). They are kept as the record of what shipped when;
 > the cited text lives at tag `v0.17.1` — see [RETIRED.md](RETIRED.md).
 
+## Settlement — 2026-09-06
+
+All five adopters carry a settling tag verified **at the tag**, not from a maintainer's report. Span is contract **v1.2.2** throughout.
+
+| Library | Settling tag | `ABI_VERSION` | Disclosed gaps at settlement |
+|---|---|---|---|
+| [c64-nist-curves](https://github.com/JC-000/c64-nist-curves) | **v0.14.0** | 4 | §8.1's `sqtab_lo`/`sqtab_hi` MUST-NOT-export unmet in the default archive — gated, no in-tree importer, riding §6.5's window to the next MAJOR. [#155](https://github.com/JC-000/c64-nist-curves/issues/155) (`mul_8x8.o` mixes displaceable groups). [#142](https://github.com/JC-000/c64-nist-curves/issues/142) open as an honestly-incomplete audit. |
+| [c64-x25519](https://github.com/JC-000/c64-x25519) | **v0.16.0** | 4 | [#130](https://github.com/JC-000/c64-x25519/issues/130) — `x25519.inc` imports `ct_mul_8x8` outside the `SHARED_CT_MUL_8X8` gate, so a §8.3-owning consumer cannot include the header. Header-side; not a §6.1 matter. |
+| [c64-ChaCha20-Poly1305](https://github.com/JC-000/c64-ChaCha20-Poly1305) | **v0.11.0** | 4 | none open |
+| [c64-polyval](https://github.com/JC-000/c64-polyval) | **v0.11.0** | 1 | none open |
+| [c64-mlkem](https://github.com/JC-000/c64-mlkem) | **v0.5.0** | 2 | Conformant without change — §6.1 member isolation is satisfied by §8.4's zero-consumer carve-out (`LIB_NO_BARE_EXPORTS` defined in the enumerating TU), so nothing displaceable shares a member. That holds only while no released consumer pins a tag. |
+
+**A settling tag is a claim that the tag is true about itself.** It is not a claim of zero known issues — the gaps above are recorded as gaps, disclosed by their own maintainers, rather than closed to tidy a tracker. And it is not a claim that the fleet is correct in practice: see the settlement handoff in [consumers.md](consumers.md), because **the adopter work reaches no consumer until the pins move**.
+
 ## Adoption status
 
 ✅ shipped &nbsp; ⚠️ partial &nbsp; ❌ todo &nbsp; n/a not applicable
