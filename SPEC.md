@@ -1,11 +1,11 @@
 # C64 Library ABI Contract
 
-**Version:** 1.1.0 (2026-09-03)
+**Version:** 1.1.1 (2026-09-06)
 **Status:** Stable.
 
 **Referencing a version.** Every version is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming.
 
-**What changed in 1.0.0, and what did not.** This release removed roughly seven eighths of the document's text. **No symbol, equate, bit value, segment name, build target or error code changed**, so a library conformant at v0.17.1 is conformant here without edits. What went was rationale, incident history and process regulation. Sections §9, §12, §13, §14 and §15 and sub-clauses §6.3, §6.6 and §6.7 are **retired**; surviving sections keep their original numbers, so every existing citation to a surviving section still resolves. See [RETIRED.md](RETIRED.md) for where the retired text lives, and [CHANGELOG.md](CHANGELOG.md) for the release history that used to be §12.
+**What changed in 1.0.0, and what did not.** This release removed roughly seven eighths of the document's text. **No symbol, equate, bit value, segment name or error code changed.** Three build targets §6.1 required at v0.17.1 — `make` with no arguments, `make lib-<variant>` and `make lib-app-owned` — are no longer required of anyone; `make lib` is unchanged. A library conformant at v0.17.1 is conformant here without edits. What went was rationale, incident history and process regulation. Sections §9, §12, §13, §14 and §15 and sub-clauses §6.3, §6.6 and §6.7 are **retired**; surviving sections keep their original numbers, so every existing citation to a surviving section still resolves. See [RETIRED.md](RETIRED.md) for where the retired text lives, and [CHANGELOG.md](CHANGELOG.md) for the release history that used to be §12.
 
 **The scope rule this document is held to.** A clause belongs here only if it governs **(1) a name, value or placement that two independently-built artifacts must agree on, where (2) a violation is invisible from inside any single repository's own build.** Both prongs are required. Anything failing either is a matter for the library's own source comments, tests or issue tracker — not for this contract. The rule is stated so it can be applied to proposals, including by people who did not write the clause being proposed.
 
@@ -185,7 +185,7 @@ SEGMENTS {
 
 Neither is ever an error, and neither condition is one a consumer can evaluate: both depend on library source the consumer does not read. A library expressing page alignment in its cfg alone — normal and correct — gets **no diagnostic at all** when a consumer drops the attribute. Mid-area, a `bss` flip makes ld65 emit a shorter image and everything after the hole loads at the wrong address; such a build can appear to work by coincidence. That is why declaring is the library's obligation rather than something a careful consumer could infer.
 
-**Standalone build.** The library's example cfg (`cfg/<libname>.cfg`) MUST add a `SEGMENTS{}` block mapping the prefixed names back to MAIN/RODATA/DATA, so the library's own tests and bench harness build unchanged.
+**Standalone build.** The library's example cfg (`cfg/<libname>.cfg` or similar) MUST add a `SEGMENTS{}` block mapping the prefixed names back to MAIN/RODATA/DATA, so the library's own tests and bench harness build unchanged.
 
 ## 5. Aggregate manifest equates
 
@@ -214,7 +214,7 @@ Libraries consuming one or more §8 shared primitives MUST additionally export `
 
 ### 6.1 Targets and artifact names
 
-Every library MUST provide `make lib`, producing `build/lib/<shortname>.a` plus the consumer-facing `.inc` header and an example `.cfg`. `<shortname>` is the library's §1 prefix, lowercased (`nistcurves`, `x25519`, `polyval`, `chacha20poly1305`, `mlkem`).
+Every library MUST provide `make lib`, producing `build/lib/<shortname>.a`. `<shortname>` is the library's §1 prefix, lowercased (`nistcurves`, `x25519`, `polyval`, `chacha20poly1305`, `mlkem`).
 
 Consumers fetch `build/lib/<shortname>[-<variant>].a` and link directly. No mid-build `sed`, no copying intermediates around, and **no `ar65` member surgery** — an archive is consumed as shipped.
 
