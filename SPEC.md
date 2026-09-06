@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 1.2.0 (2026-09-06)
+**Version:** 1.2.1 (2026-09-06)
 **Status:** Stable.
 
 **Referencing a version.** Every version is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming.
@@ -218,7 +218,7 @@ Every library MUST provide `make lib`, producing `build/lib/<shortname>.a`. `<sh
 
 Consumers fetch `build/lib/<shortname>[-<variant>].a` and link directly. No mid-build `sed`, no copying intermediates around, and **no `ar65` member surgery** — an archive is consumed as shipped.
 
-**Member isolation.** ld65 links whole archive members. A symbol a consumer may displace — suppress under `LIB_NO_BARE_EXPORTS`, or define itself under `APP_OWNED` (§8.0) — MUST live in a translation unit that exports nothing else a consumer may import — other displaceable names included — and defines nothing else the library's own code references. Otherwise the member arrives uninvited and its displaceable names collide with the consumer's own definitions, which the consumer cannot repair: member surgery is banned above.
+**Member isolation.** ld65 links whole archive members. A symbol a consumer may displace — suppress under `LIB_NO_BARE_EXPORTS`, or define itself under `APP_OWNED` (§8.0) — MUST live in a translation unit that exports nothing else a consumer may import — other displaceable names included, their own prefixed counterparts excepted — and defines nothing else the library's own code references. Otherwise the member arrives uninvited and its displaceable names collide with the consumer's own definitions, which the consumer cannot repair: member surgery is banned above.
 
 ### 6.2 Consumer defines reach the build
 
