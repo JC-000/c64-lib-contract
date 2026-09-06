@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 1.1.1 (2026-09-06)
+**Version:** 1.2.0 (2026-09-06)
 **Status:** Stable.
 
 **Referencing a version.** Every version is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming.
@@ -38,7 +38,7 @@ They live in a dedicated file, conventionally `src/lib_version.s`, exported with
 
 **`LIB_<X>_ABI_VERSION` is independent of MAJOR.** It is a generation counter for the exported surface, not a mirror of the semantic version, and it increments on any breaking export change — a removed or renamed symbol, a changed calling convention, a changed memory model. It cannot track MAJOR, because a library may break its surface on a MINOR bump while pre-1.0, leaving MAJOR at `0` carrying no signal. A consumer gating on the counter would then never fire for exactly the changes the gate exists to catch. §7 says when a change to an exported symbol's contract moves the counter even though the export list did not change.
 
-**TU isolation (required).** The deprecated bare exports below MUST live in a translation unit that exports nothing else — no §5 manifest equates, no §8.4 table equates, no code. ld65 pulls in whole object members: if the bare names share a member with anything a consumer legitimately imports, they enter the link uninvited and collide even when the consumer never referenced them. §5's aggregate equates therefore live in `src/lib_manifest.s`.
+**TU isolation (required).** The deprecated bare exports below MUST live in a translation unit that exports nothing else — no §5 manifest equates, no §8.4 table equates, no code (§6.1 member isolation). §5's aggregate equates therefore live in `src/lib_manifest.s`.
 
 **Deprecated bare forms.** Every library MUST *also* export unprefixed `LIB_VERSION_MAJOR` / `LIB_VERSION_MINOR` / `LIB_VERSION_PATCH` / `LIB_ABI_VERSION`, so existing single-library consumers keep working. These names are **deprecated**: they are identical across every library, so a consumer linking two of them and importing both manifests gets `ld65: Error: Duplicate external identifier`. They MUST be gated on `LIB_NO_BARE_EXPORTS` so a composing consumer can suppress them build-wide with `ca65 -D LIB_NO_BARE_EXPORTS=1`.
 
@@ -217,6 +217,8 @@ Libraries consuming one or more §8 shared primitives MUST additionally export `
 Every library MUST provide `make lib`, producing `build/lib/<shortname>.a`. `<shortname>` is the library's §1 prefix, lowercased (`nistcurves`, `x25519`, `polyval`, `chacha20poly1305`, `mlkem`).
 
 Consumers fetch `build/lib/<shortname>[-<variant>].a` and link directly. No mid-build `sed`, no copying intermediates around, and **no `ar65` member surgery** — an archive is consumed as shipped.
+
+**Member isolation.** ld65 links whole archive members. A symbol a consumer may displace — suppress under `LIB_NO_BARE_EXPORTS`, or define itself under `APP_OWNED` (§8.0) — MUST live in a translation unit that exports nothing else a consumer may import — other displaceable names included — and defines nothing else the library's own code references. Otherwise the member arrives uninvited and its displaceable names collide with the consumer's own definitions, which the consumer cannot repair: member surgery is banned above.
 
 ### 6.2 Consumer defines reach the build
 
@@ -429,7 +431,7 @@ LIB_PRECALC_TABLE "reu_mul",      131072, PRECALC_REGION_REU,    PRECALC_SHARED_
 LIB_PRECALC_TABLE "lim_lee_comb", 24576,  PRECALC_REGION_REU,    PRECALC_SHARED_NO,  "NISTCURVES"
 ```
 
-The exports carry the `: abs` hint for the same reason as §1's. Adopters sharing a table MUST agree on its name, size and region — an asymmetry between two adopters describing the same table is the signal this enumeration exists to surface. The macro MUST be included from a single translation unit (§1's TU-isolation rule).
+The exports carry the `: abs` hint for the same reason as §1's. Adopters sharing a table MUST agree on its name, size and region — an asymmetry between two adopters describing the same table is the signal this enumeration exists to surface. The macro MUST be included from a single translation unit (§6.1 member isolation).
 
 **Zero-consumer carve-out.** The bare `LIB_PRECALC_<name>_*` triple exists for the same reason as §1's bare version exports, and the same carve-out applies: a library with no released consumers SHOULD NOT emit it, which it does by defining `LIB_NO_BARE_EXPORTS` in the enumerating TU, `.ifndef`-guarded so a consumer's build-wide `-D` is not a redefinition.
 
