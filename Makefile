@@ -47,26 +47,46 @@ verify-negative: examples/precalc_table_negative.s precalc_table.inc | $(BUILD_D
 # 65536-byte smoke table must still export it as 'far' (the v0.4.1 fix).
 OD65 ?= od65
 
-verify-addrsize: $(BUILD_DIR)/precalc_table_smoke.o
-	@raw=$$($(OD65) --dump-exports $<) || { \
+verify-addrsize: $(BUILD_DIR)/precalc_table_smoke.o examples/precalc_table_smoke.s
+	@exp=$$(awk '\
+	  { line = $$0; sub(/^[ \t]+/, "", line) } \
+	  line ~ /^;/ { next } \
+	  line !~ /^LIB_PRECALC_TABLE[ \t]+"/ { next } \
+	  { n = split(line, arg, ","); \
+	    if (n == 5) n5++; else if (n == 4) n4++; else { bad++; next } \
+	    sizef = arg[2]; gsub(/[^0-9]/, "", sizef); \
+	    if (sizef + 0 > 65535) far += (n == 5 ? 2 : 1) } \
+	  END { if (bad || (n5 + n4) == 0) exit 1; \
+	        printf "%d %d %d\n", 6*n5 + 3*n4, 4*n5 + 2*n4, far }' \
+	  examples/precalc_table_smoke.s) || { \
+	  echo "verify-addrsize: FAIL — cannot derive the expected population from examples/precalc_table_smoke.s"; \
+	  exit 1; }; \
+	set -- $$exp; exp_total=$$1; exp_hinted=$$2; exp_far=$$3; \
+	raw=$$($(OD65) --dump-exports $<) || { \
 	  echo "verify-addrsize: FAIL — od65 did not run"; exit 1; }; \
 	declared=$$(printf '%s\n' "$$raw" | awk '/Exports:/{f=1} f && /Count:/{print $$2; exit}'); \
+	case "$$declared" in ''|*[!0-9]*) \
+	  echo "verify-addrsize: FAIL — export Count is not a number: '$$declared'"; exit 1;; esac; \
 	dump=$$(printf '%s\n' "$$raw" | awk \
-	  '/Address size:/{a=$$0; sub(/.*\(/,"",a); sub(/\).*/,"",a)} \
-	   /Name:/{n=$$0; sub(/^[^"]*"/,"",n); sub(/".*/,"",n); print n, a}'); \
+	  '/Exports:/{f=1; next} /Imports:|Segments:|Debug/{f=0} \
+	   !f{next} \
+	   /Index:/{a=""} \
+	   /Address size:/{a=$$0; sub(/.*\(/,"",a); sub(/\).*/,"",a)} \
+	   /Name:/{n=$$0; sub(/^[^"]*"/,"",n); sub(/".*/,"",n); \
+	           print n, (a == "" ? "MISSING" : a)}'); \
 	parsed=$$(printf '%s\n' "$$dump" | grep -c . || true); \
-	if [ -z "$$declared" ]; then \
-	  echo "verify-addrsize: FAIL — no export Count in the dump; od65 produced nothing usable"; \
+	if [ "$$parsed" -ne "$$declared" ]; then \
+	  echo "verify-addrsize: FAIL — parsed $$parsed of the $$declared exports od65 declared"; \
 	  exit 1; \
 	fi; \
-	if [ "$$parsed" -ne "$$declared" ]; then \
-	  echo "verify-addrsize: FAIL — parsed $$parsed of $$declared exports; the extractor dropped $$(($$declared - $$parsed))"; \
+	if [ "$$declared" -ne "$$exp_total" ]; then \
+	  echo "verify-addrsize: FAIL — object exports $$declared symbols; the source derives $$exp_total"; \
 	  exit 1; \
 	fi; \
 	hinted=$$(printf '%s\n' "$$dump" | grep -cE '(_REGION|_SHARED) ' || true); \
 	sized=$$(printf '%s\n' "$$dump" | grep -c 'smoke_reu_shared_SIZE ' || true); \
-	if [ "$$hinted" -eq 0 ] || [ "$$sized" -eq 0 ]; then \
-	  echo "verify-addrsize: FAIL — subject absent: $$hinted _REGION/_SHARED, $$sized oversized _SIZE"; \
+	if [ "$$hinted" -ne "$$exp_hinted" ] || [ "$$sized" -ne "$$exp_far" ]; then \
+	  echo "verify-addrsize: FAIL — subject count off: $$hinted/$$exp_hinted _REGION/_SHARED, $$sized/$$exp_far oversized _SIZE"; \
 	  exit 1; \
 	fi; \
 	bad=0; \
@@ -78,8 +98,12 @@ verify-addrsize: $(BUILD_DIR)/precalc_table_smoke.o
 	  case "$$sym" in *=far) ;; \
 	    *) echo "verify-addrsize: FAIL — $$sym should be far for the 65536-byte table"; bad=1;; esac; \
 	done; \
+	if printf '%s\n' "$$dump" | grep -q ' MISSING$$'; then \
+	  echo "verify-addrsize: FAIL — export with no Address size field:"; \
+	  printf '%s\n' "$$dump" | grep ' MISSING$$'; bad=1; \
+	fi; \
 	if [ $$bad -ne 0 ]; then exit 1; fi; \
-	echo "verify-addrsize: ok — $$hinted _REGION/_SHARED absolute, $$sized oversized _SIZE far, $$parsed/$$declared exports accounted for"
+	echo "verify-addrsize: ok — $$hinted/$$exp_hinted _REGION/_SHARED absolute, $$sized/$$exp_far oversized _SIZE far, $$parsed/$$declared exports, source-derived $$exp_total"
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
