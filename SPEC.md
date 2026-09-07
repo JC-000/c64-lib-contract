@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 1.2.2 (2026-09-06)
+**Version:** 1.2.3 (2026-09-07)
 **Status:** Stable.
 
 **Referencing a version.** Every version is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming.
