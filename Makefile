@@ -53,7 +53,10 @@ verify-addrsize: $(BUILD_DIR)/precalc_table_smoke.o examples/precalc_table_smoke
 	  line ~ /^;/ { next } \
 	  line !~ /^LIB_PRECALC_TABLE[ \t]+"/ { next } \
 	  { n = split(line, arg, ","); \
-	    if (n == 5) n5++; else if (n == 4) n4++; else { bad++; next } \
+	    lib = (n >= 5 ? arg[5] : ""); gsub(/[ \t]+$$/, "", lib); \
+	    if (n == 5 && lib != "") n5++; \
+	    else if (n == 4 || (n == 5 && lib == "")) n4++; \
+	    else { bad++; next } \
 	    sizef = arg[2]; gsub(/[^0-9]/, "", sizef); \
 	    if (sizef + 0 > 65535) far += (n == 5 ? 2 : 1) } \
 	  END { if (bad || (n5 + n4) == 0) exit 1; \
@@ -72,8 +75,9 @@ verify-addrsize: $(BUILD_DIR)/precalc_table_smoke.o examples/precalc_table_smoke
 	   !f{next} \
 	   /Index:/{a=""} \
 	   /Address size:/{a=$$0; sub(/.*\(/,"",a); sub(/\).*/,"",a)} \
-	   /Name:/{n=$$0; sub(/^[^"]*"/,"",n); sub(/".*/,"",n); \
-	           print n, (a == "" ? "MISSING" : a)}'); \
+	   /Name:/{n=$$0; sub(/^[^"]*"/,"",n); sub(/".*/,"",n); pend=n; next} \
+	   /Value:/ && pend != "" {v=$$2; \
+	           print pend, (a == "" ? "MISSING" : a), v; pend=""}'); \
 	parsed=$$(printf '%s\n' "$$dump" | grep -c . || true); \
 	if [ "$$parsed" -ne "$$declared" ]; then \
 	  echo "verify-addrsize: FAIL — parsed $$parsed of the $$declared exports od65 declared"; \
@@ -87,6 +91,15 @@ verify-addrsize: $(BUILD_DIR)/precalc_table_smoke.o examples/precalc_table_smoke
 	sized=$$(printf '%s\n' "$$dump" | grep -c 'smoke_reu_shared_SIZE ' || true); \
 	if [ "$$hinted" -ne "$$exp_hinted" ] || [ "$$sized" -ne "$$exp_far" ]; then \
 	  echo "verify-addrsize: FAIL — subject count off: $$hinted/$$exp_hinted _REGION/_SHARED, $$sized/$$exp_far oversized _SIZE"; \
+	  exit 1; \
+	fi; \
+	cover=$$(printf '%s\n' "$$dump" | awk \
+	  '$$1 ~ /^LIB_PRECALC_.*_REGION$$/ {t=$$1; sub(/^LIB_PRECALC_/,"",t); sub(/_REGION$$/,"",t); reg[t]=$$3} \
+	   $$1 ~ /^LIB_PRECALC_.*_SHARED$$/ {t=$$1; sub(/^LIB_PRECALC_/,"",t); sub(/_SHARED$$/,"",t); shr[t]=$$3} \
+	   END {for (t in reg) if (t in shr) seen[reg[t] "/" shr[t]] = 1; \
+	        n=0; for (k in seen) n++; print n}'); \
+	if [ "$$cover" -ne 6 ]; then \
+	  echo "verify-addrsize: FAIL — the object covers $$cover of the 6 (region, shared) combinations; the smoke matrix is incomplete"; \
 	  exit 1; \
 	fi; \
 	bad=0; \
@@ -103,7 +116,7 @@ verify-addrsize: $(BUILD_DIR)/precalc_table_smoke.o examples/precalc_table_smoke
 	  printf '%s\n' "$$dump" | grep ' MISSING$$'; bad=1; \
 	fi; \
 	if [ $$bad -ne 0 ]; then exit 1; fi; \
-	echo "verify-addrsize: ok — $$hinted/$$exp_hinted _REGION/_SHARED absolute, $$sized/$$exp_far oversized _SIZE far, $$parsed/$$declared exports, source-derived $$exp_total"
+	echo "verify-addrsize: ok — $$hinted/$$exp_hinted _REGION/_SHARED absolute, $$sized/$$exp_far oversized _SIZE far, $$parsed/$$declared exports, source-derived $$exp_total, $$cover/6 (region, shared) cells"
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
