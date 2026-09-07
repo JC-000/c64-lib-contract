@@ -48,19 +48,38 @@ verify-negative: examples/precalc_table_negative.s precalc_table.inc | $(BUILD_D
 OD65 ?= od65
 
 verify-addrsize: $(BUILD_DIR)/precalc_table_smoke.o
-	@bad=0; \
-	dump=$$($(OD65) --dump-exports $(BUILD_DIR)/precalc_table_smoke.o | \
-	        awk '/Address size:/{a=$$4} /Name:/{gsub(/"/,"",$$2); print $$2, a}'); \
-	for sym in $$(echo "$$dump" | awk '/_REGION|_SHARED/ {print $$1"="$$2}'); do \
-	  case "$$sym" in *"=(absolute)") ;; \
-	    *) echo "verify-addrsize: FAIL — $$sym should be (absolute)"; bad=1;; esac; \
+	@raw=$$($(OD65) --dump-exports $<) || { \
+	  echo "verify-addrsize: FAIL — od65 did not run"; exit 1; }; \
+	declared=$$(printf '%s\n' "$$raw" | awk '/Exports:/{f=1} f && /Count:/{print $$2; exit}'); \
+	dump=$$(printf '%s\n' "$$raw" | awk \
+	  '/Address size:/{a=$$0; sub(/.*\(/,"",a); sub(/\).*/,"",a)} \
+	   /Name:/{n=$$0; sub(/^[^"]*"/,"",n); sub(/".*/,"",n); print n, a}'); \
+	parsed=$$(printf '%s\n' "$$dump" | grep -c . || true); \
+	if [ -z "$$declared" ]; then \
+	  echo "verify-addrsize: FAIL — no export Count in the dump; od65 produced nothing usable"; \
+	  exit 1; \
+	fi; \
+	if [ "$$parsed" -ne "$$declared" ]; then \
+	  echo "verify-addrsize: FAIL — parsed $$parsed of $$declared exports; the extractor dropped $$(($$declared - $$parsed))"; \
+	  exit 1; \
+	fi; \
+	hinted=$$(printf '%s\n' "$$dump" | grep -cE '(_REGION|_SHARED) ' || true); \
+	sized=$$(printf '%s\n' "$$dump" | grep -c 'smoke_reu_shared_SIZE ' || true); \
+	if [ "$$hinted" -eq 0 ] || [ "$$sized" -eq 0 ]; then \
+	  echo "verify-addrsize: FAIL — subject absent: $$hinted _REGION/_SHARED, $$sized oversized _SIZE"; \
+	  exit 1; \
+	fi; \
+	bad=0; \
+	for sym in $$(printf '%s\n' "$$dump" | awk '/(_REGION|_SHARED) /{print $$1"="$$2}'); do \
+	  case "$$sym" in *=absolute) ;; \
+	    *) echo "verify-addrsize: FAIL — $$sym should be absolute"; bad=1;; esac; \
 	done; \
-	for sym in $$(echo "$$dump" | awk '/smoke_reu_shared_SIZE/ {print $$1"="$$2}'); do \
-	  case "$$sym" in *"=(far)") ;; \
-	    *) echo "verify-addrsize: FAIL — $$sym should be (far) for the 65536-byte table"; bad=1;; esac; \
+	for sym in $$(printf '%s\n' "$$dump" | awk '/smoke_reu_shared_SIZE /{print $$1"="$$2}'); do \
+	  case "$$sym" in *=far) ;; \
+	    *) echo "verify-addrsize: FAIL — $$sym should be far for the 65536-byte table"; bad=1;; esac; \
 	done; \
 	if [ $$bad -ne 0 ]; then exit 1; fi; \
-	echo "verify-addrsize: ok — _REGION/_SHARED absolute, oversized _SIZE still far"
+	echo "verify-addrsize: ok — $$hinted _REGION/_SHARED absolute, $$sized oversized _SIZE far, $$parsed/$$declared exports accounted for"
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
