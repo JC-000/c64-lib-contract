@@ -13,17 +13,28 @@ contract imposes.**" Do not read this file as grounds to un-retire §15.
 Standing rule. Applies to SPEC.md clauses, rulings on issues, `adopters.md` status claims and
 tooling alike — not only to whole-document reviews.
 
-- **The adversary must not be whoever wrote the change.** The author is the wrong sole reviewer of
-  their own clause; independence is the entire point.
-- **Brief it to attack, and give it a section and an adversarial framing**, not "please review".
-  It has two standing jobs, to be discharged on every change regardless of what else it was asked:
-  keep the contract **concise and readable**, and **refuse closure loops**.
-- **The churn test — apply it to every proposed obligation.** A change that drives this repo and
-  the five libraries through compliance work must deliver at least one of: easier integration for
-  a consumer, a new capability, or a measurable improvement. Work whose only product is closing
-  its own loop — a clause generalising an incident that its own fix already settled, a conformance
-  pass that ends in a byte-identical artifact, a status table churned to match a status table —
-  fails the test and does not get commissioned. The adversary says so out loud, in those terms.
+- **The adversary must not be the agent or context that drafted the change**, and is briefed to
+  attack a named section, not to "review" it. In a single-maintainer repo authorship is not the
+  discriminator — freshness is. An agent re-reading its own draft ratifies it.
+- **Concision has a cost, so make the proposer pay it.** Every proposed addition states its word
+  count and what it deletes or subsumes. The contract is ~5,400 words governing roughly 3,000 lines
+  of assembly, after an 87% cut; a change that only adds is a change that has not been thought
+  through.
+- **The churn test — apply it to every proposed obligation.** Work that drives this repo and the
+  five libraries through compliance effort must **name what breaks if it does not exist, and count
+  the adopters it actually moves.** `CHANGELOG.md:10` is the model — *"Measured before ruling: of
+  the five adopters only c64-nist-curves is affected … A contract clause was disproportionate to
+  one adopter and one file."* Measure before ruling; do not accept an adjective in place of a
+  count. Three shapes fail the test outright, all attested:
+  1. **A clause generalising an incident its own fix already settled.** §14's flagship fix landed
+     26 hours before the clause existed (`RETIRED.md:17`); every defect §15 existed to prevent was
+     already found and fixed by the audits that motivated it (`RETIRED.md:18`).
+  2. **A conformance pass no consumer's link can observe.** c64-x25519#123 spent **+1080 −33**
+     discharging a SHOULD-level §15, stating in its own body that "Nothing here was non-conformant
+     before". The bar is *unobservable to a consumer's link*, not *byte-identical*: a file split
+     moving no exported name is a legitimate pass.
+  3. **A status table churned to match a status table.** `adopters.md` is load-bearing; README's
+     banner is derived from it and is not worth a PR of its own.
   The clause never has to demonstrate it caused anything, so someone has to ask.
 - **Every added sentence gets the two-prong test**, not just the deleted ones. A clause may
   regulate only (1) a name, value or placement that two independently-built artifacts must agree
@@ -31,13 +42,16 @@ tooling alike — not only to whole-document reviews.
   What fails either belongs in a source comment, a repo-local test, or an issue.
 - **Grep every quotation and `file:line` the adversary hands you before repeating it.** Agents
   fabricate citations — verbatim quotes that were not in SPEC.md have been produced here, attached
-  to substance that was otherwise sound. Verify before acting, always.
-- For a multi-part change, the shape that works is: parallel auditors with distinct sections →
-  a fixer in an isolated `git worktree` → a *separate* adversarial reviewer per round, with the
-  supervisor verifying citations at each hand-off. Never run the fixer in a `~/Documents/*`
-  checkout; parallel sessions have uncommitted work there.
-- Subagent return text truncates around 6,000 characters. Tell agents to front-load verdicts and
-  totals and to keep tables last.
+  to substance that was otherwise sound. An adversary is also scoped to what it searched: one that
+  read only this repo will call an adopter-repo instance invented.
+- **Record the disposition.** The PR or issue says what the review found and what was accepted or
+  rejected, with the reason. "It was reviewed" is unfalsifiable, and an unrecorded correct finding
+  disappears — the same gap section 2 closes for checks by demanding the mutation and failure text.
+- For a multi-part change: parallel auditors with distinct sections → a fixer in an isolated
+  `git worktree` → a *separate* adversarial reviewer per round, the supervisor verifying citations
+  at each hand-off. Never run the fixer in a `~/Documents/*` checkout; parallel sessions have
+  uncommitted work there. Agent replies truncate near 6,000 characters, so require front-loaded
+  verdicts and totals, tables last.
 
 ## 2. Red/green: no check is trusted until it has been seen failing
 
@@ -45,7 +59,8 @@ A check that has never failed is not evidence. Drive it red against a deliberate
 go green when the defect is removed, and **record both in the commit or PR body** — the mutation
 used and the exact failure text emitted.
 
-Before believing any green:
+**These rules bind this repo's own gates, not only adopters' and not only new work.** Not applying
+them to `make verify` is how #194 shipped. Before believing any green:
 
 - **Confirm the failure names the property under test.** A build that goes red because an adjacent
   assert fired first has not exercised your check at all. Read the failure text; do not infer it
@@ -71,7 +86,8 @@ Before believing any green:
 ## 3. Workflow
 
 - **`main` is PR-only.** Branch, push, `gh pr create` — never push `main` directly, not even for a
-  one-line chore. Branches are `docs/…`, `spec/…`, `feat/…`, `fix/…`, `chore/…`.
+  one-line chore. Branches are conventionally `docs/…`, `spec/…`, `fix/…`, `feat/…`, `chore/…`, in
+  descending order of use; `consumers/…` and `claude/…` also appear. The list is not closed.
 - **Do not stack PRs.** Two stacked PRs merging seconds apart stranded a released version off
   `main` here; GitHub's auto-retarget did not fire in the gap. Sequential PRs against `main` cost
   one rebase and have no such failure mode.
@@ -80,8 +96,7 @@ Before believing any green:
 - Conventional commits with a scope: `docs(adopters): …`, `spec(1.2.2): …`, `fix(…): …`.
 - `gh` bodies go through a heredoc to a file and `--body-file`, then get read back. Never
   `--body "…"` with backticks in it.
-- If `precalc_table.inc` or `examples/*.s` changed, `make verify` must pass — but read section 2
-  before citing a green from it as evidence; its legs are subject to these rules like any other.
+- If `precalc_table.inc` or `examples/*.s` changed, `make verify` must pass.
 - **A released SPEC.md change bumps the version line and adds a `CHANGELOG.md` entry.** Per
   release, not per commit: a multi-commit cut shares one version line, and a correction to the
   version line itself bumps nothing.
