@@ -204,7 +204,7 @@ Libraries consuming one or more §8 shared primitives MUST additionally export `
 
 **The basis is the placed span.** Each figure measures the segments it covers **as placed** — the extent they occupy in a real link, including alignment fill **internal** to them — **not** the sum of member object sizes. A sum is exact only where no segment takes fragments from two objects *and* every inter-segment gap is charged; neither is guaranteed, and both stop holding silently on a file split or a translation-unit reorder.
 
-**Charge what is inside each segment, and nothing between or before them.** Both of those gaps are `(-previous_end) mod alignment`, fixed by where the consumer places the segments and in what order — reordering relocates such padding rather than removing it — so neither is a library property. **A consumer reserving one contiguous region pays both, and cannot derive them from these equates**: they need per-segment extents, which appear only in its own link map.
+**Charge what is inside each segment, and nothing between or before them.** Both of those gaps are `(-previous_end) mod alignment`, fixed by where the consumer places the segments and in what order — reordering relocates such padding and can multiply it — so neither is a library property. **A consumer reserving one contiguous region pays both, and cannot derive them from these equates**: they need per-segment extents, which appear only in its own link map.
 
 **This governs the basis, not the scope.** Which segments a figure covers is unchanged.
 
