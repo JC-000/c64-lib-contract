@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 1.2.2 (2026-09-06)
+**Version:** 1.2.3 (2026-09-07)
 **Status:** Stable.
 
 **Referencing a version.** Every version is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming.
@@ -201,6 +201,12 @@ Every library MUST export the following four integer equates, from `src/lib_mani
 Libraries consuming one or more §8 shared primitives MUST additionally export `LIB_<X>_SHARED_PRIMITIVES` (ownership) and `LIB_<X>_SHARED_CONSUMES` (consumption) bitmasks, ORed from the per-primitive bit constants in each §8.x sub-clause. See §8.0 for the allocation table, the build-config state definitions and both masks' required construction forms.
 
 **Footprint equates MUST be safe-direction: round up, never down.** They exist so a consumer can bind them to a budget at assemble time, and an equate that understates the true footprint makes that check pass while the library overruns. Refresh them when a release substantively changes one. `RESIDENT` and `COLD` are a pair — `COLD` is reclaimable after init and may legitimately live in a different region — so a consumer sizing a single region MUST budget for both.
+
+**The basis is the placed span.** Each figure measures the segments it covers **as placed** — the extent they occupy in a real link, including alignment fill **internal** to them — **not** the sum of member object sizes. A sum is exact only where no segment takes fragments from two objects *and* every inter-segment gap is charged; neither is guaranteed, and both stop holding silently on a file split or a translation-unit reorder.
+
+**Charge what is inside each segment, and nothing between or before them.** Both of those gaps are `(-previous_end) mod alignment`, fixed by where the consumer places the segments and in what order — reordering relocates such padding and can multiply it — so neither is a library property. **A consumer reserving one contiguous region pays both, and cannot derive them from these equates**: they need per-segment extents, which appear only in its own link map.
+
+**This governs the basis, not the scope.** Which segments a figure covers is unchanged.
 
 **Where a library's real input restriction is a bound a consumer must respect** — a maximum length, a ceiling — it SHOULD publish that bound here as a symbol the consumer can reference: an equate where the bound fits one, an exported label where it does not (a 256-bit modulus bound cannot be a ca65 equate at all). A consumer SHOULD reference the published symbol rather than re-derive the value. Where the restriction is a *relation* over two caller-supplied values rather than a constant, no scalar expresses it and none should be published — publishing a vacuous or wrong one is worse than publishing nothing.
 
