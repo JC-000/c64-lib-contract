@@ -44,7 +44,7 @@ They live in a dedicated file, conventionally `src/lib_version.s`, exported with
 
 > Their removal was previously scheduled for contract v1.0. It is **deferred to a future MAJOR** and deliberately not bundled with this release: dropping four exports is a real ABI change for every adopter, and it should not ride along with a release whose headline is that text was deleted. It will be its own release, with its own review.
 
-**Zero-consumer carve-out.** A library onboarding with **no released consumers** SHOULD NOT export the bare forms at all — it has no existing consumer to protect, so the export adds a claimant to the exact four colliding names and defends no one. "No released consumers" means no tag of a consumer listed in `consumers.md` links any of the library's tags. The test applies at onboarding, or when a tag first omits the forms: a library that omitted them while it had none need not restore them; one still shipping them once a consumer tag links it keeps the MUST. This is SHOULD NOT rather than MUST NOT because the bare forms are harmless in a single-library link; what a library MUST NOT do is ship them ungated.
+**Zero-consumer carve-out.** A library onboarding with **no released consumers** SHOULD NOT export the bare forms at all — it has no existing consumer to protect, so the export adds a claimant to the exact four colliding names and defends no one. "No released consumers" means no tag of a consumer listed in `consumers.md` links the library. The test applies at onboarding, or when a tag first omits the forms: a library that omitted them while it had none need not restore them; one still shipping them once a consumer tag links it keeps the MUST. This is SHOULD NOT rather than MUST NOT because the bare forms are harmless in a single-library link; what a library MUST NOT do is ship them ungated.
 
 **Pattern:**
 
@@ -224,7 +224,7 @@ Every library MUST provide `make lib`, producing `build/lib/<shortname>.a`. `<sh
 
 Consumers fetch `build/lib/<shortname>[-<variant>].a` and link directly. No mid-build `sed`, no copying intermediates around, and **no `ar65` member surgery** — an archive is consumed as shipped.
 
-**Member isolation.** ld65 links whole archive members. A symbol a consumer may displace — suppress under `LIB_NO_BARE_EXPORTS`, or define itself under `APP_OWNED` (§8.0) — MUST live in a translation unit that exports nothing else a consumer may import — other displaceable names included, their own prefixed counterparts excepted — and defines nothing else the library's own code references. Otherwise the member arrives uninvited and its displaceable names collide — with the consumer's own definitions, or with the identical bare name a sibling library exports — and the consumer can repair neither: member surgery is banned above. A name compiled out whenever its §8.x deferral switch is defined does not count against a TU it shares; `LIB_NO_BARE_EXPORTS` is not a deferral switch.
+**Member isolation.** ld65 links whole archive members. A symbol a consumer may displace — suppress under `LIB_NO_BARE_EXPORTS`, or define itself under `APP_OWNED` (§8.0) — MUST live in a translation unit that exports nothing else a consumer may import — other displaceable names included, their own prefixed counterparts excepted — and defines nothing else the library's own code references. Otherwise the member arrives uninvited and its displaceable names collide — with the consumer's own definitions, or with the identical bare name a sibling library exports — and the consumer can repair neither: member surgery is banned above. A name compiled out whenever its §8.x deferral switch is defined, and not gated on `LIB_NO_BARE_EXPORTS`, does not count against a TU it shares.
 
 ### 6.2 Consumer defines reach the build
 
@@ -271,7 +271,7 @@ Each §8.x sub-clause declares one bit constant `LIB_SHARED_PRIMITIVES_<NAME>`. 
 | Bit | Constant | Primitive | Deferral switch | Defined in |
 |---|---|---|---|---|
 | `$0001` | `LIB_SHARED_PRIMITIVES_SQTAB` | 8×8 quarter-square multiply table | `SHARED_SQTAB_INIT` | §8.1 |
-| `$0002` | `LIB_SHARED_PRIMITIVES_REU_MUL` | 8×8→16 REU multiplication table (128 KB bank pair) | `SHARED_REU_MUL_INIT` | §8.2 |
+| `$0002` | `LIB_SHARED_PRIMITIVES_REU_MUL` | 8×8→16 REU multiplication table (128 KB bank pair) | `SHARED_REU_MUL_INIT` / `SHARED_REU_MUL_FETCH` | §8.2 |
 | `$0004` | `LIB_SHARED_PRIMITIVES_CT_MUL_8X8` | constant-time 8×8→16 multiply body | `SHARED_CT_MUL_8X8` | §8.3 |
 
 **Definition site (normative).** These bit constants are plain assemble-time equates and **MUST NOT** be `.export`ed. Each adopter copies the block verbatim into its own source and `.ifndef`-guards it so a consumer may define them globally without a redefinition error:
