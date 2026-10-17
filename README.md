@@ -25,7 +25,7 @@ This repo specifies the contract that lets libraries publish their version, ZP s
 
 - **Library authors**: read SPEC.md, open a PR adding your library to `adopters.md`, file tracking issues against your library for each unimplemented section. Cross-link to this repo from your library's README so consumers can find the contract.
 - **Consumer authors**: read SPEC.md, open a PR adding your project to `consumers.md`, link to your project's library-ingestion docs. If you need new contract sections (e.g., your consumer requires a property no current library exposes), open a PR against SPEC.md with the proposed addition + rationale.
-- **Contract changes**: open a PR with the change + rationale. Breaking changes go through the SPEC §7 deprecation cycle.
+- **Contract changes**: open a PR with the change + rationale.
 
 ## Acknowledgments
 

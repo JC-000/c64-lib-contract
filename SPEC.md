@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 1.2.3 (2026-09-07)
+**Version:** 1.3.0 (2026-10-17)
 **Status:** Stable.
 
 **Referencing a version.** Every version is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming.
@@ -38,13 +38,13 @@ They live in a dedicated file, conventionally `src/lib_version.s`, exported with
 
 **`LIB_<X>_ABI_VERSION` is independent of MAJOR.** It is a generation counter for the exported surface, not a mirror of the semantic version, and it increments on any breaking export change — a removed or renamed symbol, a changed calling convention, a changed memory model. It cannot track MAJOR, because a library may break its surface on a MINOR bump while pre-1.0, leaving MAJOR at `0` carrying no signal. A consumer gating on the counter would then never fire for exactly the changes the gate exists to catch. §7 says when a change to an exported symbol's contract moves the counter even though the export list did not change.
 
-**TU isolation (required).** The deprecated bare exports below MUST live in a translation unit that exports nothing else — no §5 manifest equates, no §8.4 table equates, no code (§6.1 member isolation). §5's aggregate equates therefore live in `src/lib_manifest.s`.
+**TU isolation (required).** The deprecated bare exports below MUST live in a translation unit that exports nothing but them and their prefixed counterparts — no §5 manifest equates, no §8.4 table equates, no code (§6.1 member isolation). §5's aggregate equates therefore live in `src/lib_manifest.s`.
 
 **Deprecated bare forms.** Every library MUST *also* export unprefixed `LIB_VERSION_MAJOR` / `LIB_VERSION_MINOR` / `LIB_VERSION_PATCH` / `LIB_ABI_VERSION`, so existing single-library consumers keep working. These names are **deprecated**: they are identical across every library, so a consumer linking two of them and importing both manifests gets `ld65: Error: Duplicate external identifier`. They MUST be gated on `LIB_NO_BARE_EXPORTS` so a composing consumer can suppress them build-wide with `ca65 -D LIB_NO_BARE_EXPORTS=1`.
 
 > Their removal was previously scheduled for contract v1.0. It is **deferred to a future MAJOR** and deliberately not bundled with this release: dropping four exports is a real ABI change for every adopter, and it should not ride along with a release whose headline is that text was deleted. It will be its own release, with its own review.
 
-**Zero-consumer carve-out.** A library onboarding with **no released consumers** SHOULD NOT export the bare forms at all — it has no existing consumer to protect, so the export adds a claimant to the exact four colliding names and defends no one. "No released consumers" means no tagged release any consumer pins, checkable from the library's own tags and `consumers.md`. A library that has cut a release someone links keeps the MUST. This is SHOULD NOT rather than MUST NOT because the bare forms are harmless in a single-library link; what a library MUST NOT do is ship them ungated.
+**Zero-consumer carve-out.** A library onboarding with **no released consumers** SHOULD NOT export the bare forms at all — it has no existing consumer to protect, so the export adds a claimant to the exact four colliding names and defends no one. "No released consumers" means no tag of a consumer listed in `consumers.md` links the library. The test applies at onboarding, or when a tag first omits the forms: a library that omitted them while it had none need not restore them; one still shipping them once a consumer tag links it keeps the MUST. This is SHOULD NOT rather than MUST NOT because the bare forms are harmless in a single-library link; what a library MUST NOT do is ship them ungated.
 
 **Pattern:**
 
@@ -189,7 +189,7 @@ Neither is ever an error, and neither condition is one a consumer can evaluate: 
 
 ## 5. Aggregate manifest equates
 
-Every library MUST export the following four integer equates, from `src/lib_manifest.s` — **not** `src/lib_version.s`, which §1 requires to carry the deprecated bare exports and nothing else, so that importing a manifest equate cannot drag them into the link:
+Every library MUST export the following four integer equates, from `src/lib_manifest.s` — **not** `src/lib_version.s`, which §1 requires to carry the deprecated bare exports and their prefixed forms only, so that importing a manifest equate cannot drag them into the link:
 
 | Symbol | Semantics |
 |---|---|
@@ -204,7 +204,7 @@ Libraries consuming one or more §8 shared primitives MUST additionally export `
 
 **The basis is the placed span.** Each figure measures the segments it covers **as placed** — the extent they occupy in a real link, including alignment fill **internal** to them — **not** the sum of member object sizes. A sum is exact only where no segment takes fragments from two objects *and* every inter-segment gap is charged; neither is guaranteed, and both stop holding silently on a file split or a translation-unit reorder.
 
-**Charge what is inside each segment, and nothing between or before them.** Both of those gaps are `(-previous_end) mod alignment`, fixed by where the consumer places the segments and in what order — reordering relocates such padding and can multiply it — so neither is a library property. **A consumer reserving one contiguous region pays both, and cannot derive them from these equates**: they need per-segment extents, which appear only in its own link map.
+**The span excludes fill between or before the segments.** Both of those gaps are `(-previous_end) mod alignment`, fixed by where the consumer places the segments and in what order — reordering relocates such padding and can multiply it — so neither is a library property. **A consumer reserving one contiguous region pays both, and cannot derive them from these equates**: they need per-segment extents, which appear only in its own link map.
 
 **This governs the basis, not the scope.** Which segments a figure covers is unchanged.
 
@@ -220,11 +220,11 @@ Libraries consuming one or more §8 shared primitives MUST additionally export `
 
 ### 6.1 Targets and artifact names
 
-Every library MUST provide `make lib`, producing `build/lib/<shortname>.a`. `<shortname>` is the library's §1 prefix, lowercased (`nistcurves`, `x25519`, `polyval`, `chacha20poly1305`, `mlkem`).
+Every library MUST provide `make lib`, producing `build/lib/<shortname>.a`. `<shortname>` is the library's §1 prefix, lowercased with underscores removed (`nistcurves`, `x25519`, `polyval`, `chacha20poly1305`, `mlkem`).
 
 Consumers fetch `build/lib/<shortname>[-<variant>].a` and link directly. No mid-build `sed`, no copying intermediates around, and **no `ar65` member surgery** — an archive is consumed as shipped.
 
-**Member isolation.** ld65 links whole archive members. A symbol a consumer may displace — suppress under `LIB_NO_BARE_EXPORTS`, or define itself under `APP_OWNED` (§8.0) — MUST live in a translation unit that exports nothing else a consumer may import — other displaceable names included, their own prefixed counterparts excepted — and defines nothing else the library's own code references. Otherwise the member arrives uninvited and its displaceable names collide — with the consumer's own definitions, or with the identical bare name a sibling library exports — and the consumer can repair neither: member surgery is banned above.
+**Member isolation.** ld65 links whole archive members. A symbol a consumer may displace — suppress under `LIB_NO_BARE_EXPORTS`, or define itself under `APP_OWNED` (§8.0) — MUST live in a translation unit that exports nothing else a consumer may import — other displaceable names included, their own prefixed counterparts excepted — and defines nothing else the library's own code references. Otherwise the member arrives uninvited and its displaceable names collide — with the consumer's own definitions, or with the identical bare name a sibling library exports — and the consumer can repair neither: member surgery is banned above. Names compiled out under one identical condition count as one name. A name compiled out whenever its §8.x deferral switch is defined, and not gated on `LIB_NO_BARE_EXPORTS`, does not count against a TU it shares.
 
 ### 6.2 Consumer defines reach the build
 
@@ -243,7 +243,7 @@ A library shipping more than one archive (per-variant, per-profile) MUST ensure 
 
 ### 6.5 The consumer-facing name surface
 
-Renames of exported symbols, archive members, segment names or make targets MUST go through a deprecation window: ship the new name alongside the old one from the library's next MINOR release, and drop the old form at its next MAJOR.
+Renames of exported symbols, archive names, segment names or make targets MUST go through a deprecation window: ship the new name alongside the old one from the library's next MINOR release, and drop the old form at its next MAJOR.
 
 A deprecated alias MUST be gated by `LIB_NO_BARE_EXPORTS` wherever the old name is one that collides across libraries — an ungated alias preserves the collision it exists to retire for the whole window.
 
@@ -254,9 +254,9 @@ A deprecated alias MUST be gated by `LIB_NO_BARE_EXPORTS` wherever the old name 
 - **PATCH** — bug fix only, no ABI surface change.
 - **`LIB_<X>_ABI_VERSION`** is not derived from MAJOR (§1). The consumer-side gate `.assert LIB_<X>_ABI_VERSION = <expected>, lderror, "..."` is the load-bearing breakage check — `.assert`/`lderror`, never `.if`/`.error`.
 
-**Whether the counter moves turns on what the code does, not on whether the export list changed.** It moves when a consumer conforming to the previously documented contract can be broken by the change — most often when an existing entry point's actual return set gains a value, since exhaustive handling silently becomes non-exhaustive. It holds when behaviour that was previously undocumented becomes documented, and when documentation is corrected to match code that did not change: a consumer relying on the wrong documented contract was already broken at every prior release, so the correction discloses that rather than causing it. This clause governs `LIB_<X>_ABI_VERSION` only. Such a change is not thereby MAJOR under the first bullet above, nor subject to the deprecation cycle below.
+**Whether the counter moves turns on what the code does, not on whether the export list changed.** It moves when a consumer conforming to the previously documented contract can be broken by the change — most often when an existing entry point's actual return set gains a value, since exhaustive handling silently becomes non-exhaustive. It holds when behaviour that was previously undocumented becomes documented, and when documentation is corrected to match code that did not change: a consumer relying on the wrong documented contract was already broken at every prior release, so the correction discloses that rather than causing it. This clause governs `LIB_<X>_ABI_VERSION` only. Such a change is not thereby MAJOR under the first bullet above.
 
-Breaking changes go through a one-MINOR-release deprecation cycle.
+While a library's MAJOR is `0`, MINOR takes the role the first bullet gives MAJOR; renames follow §6.5, whose MAJOR stays literal.
 
 ## 8. Shared primitives
 
@@ -271,7 +271,7 @@ Each §8.x sub-clause declares one bit constant `LIB_SHARED_PRIMITIVES_<NAME>`. 
 | Bit | Constant | Primitive | Deferral switch | Defined in |
 |---|---|---|---|---|
 | `$0001` | `LIB_SHARED_PRIMITIVES_SQTAB` | 8×8 quarter-square multiply table | `SHARED_SQTAB_INIT` | §8.1 |
-| `$0002` | `LIB_SHARED_PRIMITIVES_REU_MUL` | 8×8→16 REU multiplication table (128 KB bank pair) | `SHARED_REU_MUL_INIT` | §8.2 |
+| `$0002` | `LIB_SHARED_PRIMITIVES_REU_MUL` | 8×8→16 REU multiplication table (128 KB bank pair) | `SHARED_REU_MUL_INIT` / `SHARED_REU_MUL_FETCH` | §8.2 |
 | `$0004` | `LIB_SHARED_PRIMITIVES_CT_MUL_8X8` | constant-time 8×8→16 multiply body | `SHARED_CT_MUL_8X8` | §8.3 |
 
 **Definition site (normative).** These bit constants are plain assemble-time equates and **MUST NOT** be `.export`ed. Each adopter copies the block verbatim into its own source and `.ifndef`-guards it so a consumer may define them globally without a redefinition error:
@@ -352,7 +352,7 @@ The consumer overrides via `ca65 -D LIB_SHARED_SQTAB_BASE=0x<addr>` — `$`-free
 
 **Init.** The canonical entry point is `mul_tables_init`. It populates both tables from the quarter-square recurrence and MUST be idempotent.
 
-**Migration and deferral.** A library MAY keep its own `sqtab_init` exported for back-compat. Under `.ifdef SHARED_SQTAB_INIT` its private init body is gated out and `mul_tables_init` takes over, letting a consumer flip libraries one at a time. **A deferring build MUST `.import` the provider's `mul_tables_init`; exporting a stub body under the deferred name is non-conformant** — it puts two same-named canonical inits into every composed link, which is the duplicate-identifier failure the switch exists to remove.
+**Migration and deferral.** A library MAY keep its own `sqtab_init` exported for back-compat. Under `.ifdef SHARED_SQTAB_INIT` its private init body is gated out and `mul_tables_init` takes over, letting a consumer flip libraries one at a time. **Exporting a stub body under the deferred name is non-conformant** — it puts two same-named canonical inits into every composed link, which is the duplicate-identifier failure the switch exists to remove.
 
 **Registry.** Adopters MUST emit one §8.4 invocation. The table name is normative — never a library-prefixed variant, which would destroy the cross-adopter audit signal:
 
@@ -402,7 +402,7 @@ LIB_SHARED_REU_MUL_BANKS_USED = (1 .shl LIB_SHARED_REU_MUL_BANK) | (1 .shl (LIB_
 
 **DMA completion and settle (normative).** After every REU execute, the library MUST (a) confirm completion via the `$DF00` status bit before the next REU register access, and (b) observe a post-execute settle before that access. A settle met by intervening code is conformant.
 
-**Deferral.** `SHARED_REU_MUL_INIT` and `SHARED_REU_MUL_FETCH` **MUST be defined both or neither** — partial deferral is non-conformant. The §8.1 import-never-stub rule applies: a deferring build MUST NOT export a body under a canonical name.
+**Deferral.** `SHARED_REU_MUL_INIT` and `SHARED_REU_MUL_FETCH` **MUST be defined both or neither** — partial deferral is non-conformant. §8.1's stub ban applies: a deferring build MUST NOT export a body under a canonical name.
 
 **Registry.** `LIB_PRECALC_TABLE "reu_mul", 131072, PRECALC_REGION_REU, PRECALC_SHARED_YES, "<X>"` — the name `"reu_mul"` is normative.
 
