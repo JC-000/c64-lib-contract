@@ -21,7 +21,9 @@ Measured across all five libraries and both consumers before ruling. **No adopte
 
 §6.1: `<shortname>` is the prefix lowercased **with underscores removed**, matching the listed `chacha20poly1305`. 0 adopters move.
 
-§6.5: archive members leave the rename window. No consumer names a member (1.2.2: "members are not consumer-named"). 0 adopters move. SPEC.md 5,545 → 5,565 words.
+§6.5: archive members leave the rename window. No consumer names a member (1.2.2: "members are not consumer-named"). 0 adopters move.
+
+§8.1: "a deferring build MUST `.import` the provider's `mul_tables_init`" is cut; the stub-export ban stays. ca65 emits no import record for an unreferenced symbol (`.import foo` alone: `od65 --dump-imports` Count 0), so no built object can show the import, and a library that calls the init must import it to assemble anyway. c64-nist-curves, with no TU importing it, was a literal violator for no observable reason. 0 adopters move. SPEC.md 5,545 → 5,557 words.
 
 ### 1.2.2 — 2026-09-06
 Corrects §6.1's member-isolation rationale, which named only one of the two collision directions the clause governs. The operative test always named both — "suppress under `LIB_NO_BARE_EXPORTS`" is the library-versus-library case (#177: two libraries each exporting the identical bare `LIB_PRECALC_sqtab_SHARED`, with no consumer definition anywhere) and "or define itself under `APP_OWNED`" is the consumer case (#179) — but the trailing sentence mentioned only consumer definitions. Every reading that went wrong today went wrong there. No test changes and no obligation is added or removed: every library conformant at 1.2.1 is conformant here.

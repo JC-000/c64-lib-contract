@@ -352,7 +352,7 @@ The consumer overrides via `ca65 -D LIB_SHARED_SQTAB_BASE=0x<addr>` — `$`-free
 
 **Init.** The canonical entry point is `mul_tables_init`. It populates both tables from the quarter-square recurrence and MUST be idempotent.
 
-**Migration and deferral.** A library MAY keep its own `sqtab_init` exported for back-compat. Under `.ifdef SHARED_SQTAB_INIT` its private init body is gated out and `mul_tables_init` takes over, letting a consumer flip libraries one at a time. **A deferring build MUST `.import` the provider's `mul_tables_init`; exporting a stub body under the deferred name is non-conformant** — it puts two same-named canonical inits into every composed link, which is the duplicate-identifier failure the switch exists to remove.
+**Migration and deferral.** A library MAY keep its own `sqtab_init` exported for back-compat. Under `.ifdef SHARED_SQTAB_INIT` its private init body is gated out and `mul_tables_init` takes over, letting a consumer flip libraries one at a time. **Exporting a stub body under the deferred name is non-conformant** — it puts two same-named canonical inits into every composed link, which is the duplicate-identifier failure the switch exists to remove.
 
 **Registry.** Adopters MUST emit one §8.4 invocation. The table name is normative — never a library-prefixed variant, which would destroy the cross-adopter audit signal:
 
