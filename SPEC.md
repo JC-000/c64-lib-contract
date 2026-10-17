@@ -44,7 +44,7 @@ They live in a dedicated file, conventionally `src/lib_version.s`, exported with
 
 > Their removal was previously scheduled for contract v1.0. It is **deferred to a future MAJOR** and deliberately not bundled with this release: dropping four exports is a real ABI change for every adopter, and it should not ride along with a release whose headline is that text was deleted. It will be its own release, with its own review.
 
-**Zero-consumer carve-out.** A library onboarding with **no released consumers** SHOULD NOT export the bare forms at all — it has no existing consumer to protect, so the export adds a claimant to the exact four colliding names and defends no one. "No released consumers" means no consumer release links any of the library's tags. The test applies when the forms are dropped: a library that dropped them while it had none need not restore them, and one that ships them keeps the MUST. This is SHOULD NOT rather than MUST NOT because the bare forms are harmless in a single-library link; what a library MUST NOT do is ship them ungated.
+**Zero-consumer carve-out.** A library onboarding with **no released consumers** SHOULD NOT export the bare forms at all — it has no existing consumer to protect, so the export adds a claimant to the exact four colliding names and defends no one. "No released consumers" means no tag of a consumer listed in `consumers.md` links any of the library's tags. The test applies at onboarding, or when a tag first omits the forms: a library that omitted them while it had none need not restore them; one still shipping them once a consumer tag links it keeps the MUST. This is SHOULD NOT rather than MUST NOT because the bare forms are harmless in a single-library link; what a library MUST NOT do is ship them ungated.
 
 **Pattern:**
 
@@ -224,7 +224,7 @@ Every library MUST provide `make lib`, producing `build/lib/<shortname>.a`. `<sh
 
 Consumers fetch `build/lib/<shortname>[-<variant>].a` and link directly. No mid-build `sed`, no copying intermediates around, and **no `ar65` member surgery** — an archive is consumed as shipped.
 
-**Member isolation.** ld65 links whole archive members. A symbol a consumer may displace — suppress under `LIB_NO_BARE_EXPORTS`, or define itself under `APP_OWNED` (§8.0) — MUST live in a translation unit that exports nothing else a consumer may import — other displaceable names included, their own prefixed counterparts excepted — and defines nothing else the library's own code references. Otherwise the member arrives uninvited and its displaceable names collide — with the consumer's own definitions, or with the identical bare name a sibling library exports — and the consumer can repair neither: member surgery is banned above.
+**Member isolation.** ld65 links whole archive members. A symbol a consumer may displace — suppress under `LIB_NO_BARE_EXPORTS`, or define itself under `APP_OWNED` (§8.0) — MUST live in a translation unit that exports nothing else a consumer may import — other displaceable names included, their own prefixed counterparts excepted — and defines nothing else the library's own code references. Otherwise the member arrives uninvited and its displaceable names collide — with the consumer's own definitions, or with the identical bare name a sibling library exports — and the consumer can repair neither: member surgery is banned above. A name compiled out whenever its §8.x deferral switch is defined does not count against a TU it shares; `LIB_NO_BARE_EXPORTS` is not a deferral switch.
 
 ### 6.2 Consumer defines reach the build
 
@@ -243,7 +243,7 @@ A library shipping more than one archive (per-variant, per-profile) MUST ensure 
 
 ### 6.5 The consumer-facing name surface
 
-Renames of exported symbols, segment names or make targets MUST go through a deprecation window: ship the new name alongside the old one from the library's next MINOR release, and drop the old form at its next MAJOR.
+Renames of exported symbols, archive names, segment names or make targets MUST go through a deprecation window: ship the new name alongside the old one from the library's next MINOR release, and drop the old form at its next MAJOR.
 
 A deprecated alias MUST be gated by `LIB_NO_BARE_EXPORTS` wherever the old name is one that collides across libraries — an ungated alias preserves the collision it exists to retire for the whole window.
 
@@ -256,7 +256,7 @@ A deprecated alias MUST be gated by `LIB_NO_BARE_EXPORTS` wherever the old name 
 
 **Whether the counter moves turns on what the code does, not on whether the export list changed.** It moves when a consumer conforming to the previously documented contract can be broken by the change — most often when an existing entry point's actual return set gains a value, since exhaustive handling silently becomes non-exhaustive. It holds when behaviour that was previously undocumented becomes documented, and when documentation is corrected to match code that did not change: a consumer relying on the wrong documented contract was already broken at every prior release, so the correction discloses that rather than causing it. This clause governs `LIB_<X>_ABI_VERSION` only. Such a change is not thereby MAJOR under the first bullet above.
 
-While a library's MAJOR is `0`, MINOR takes the role the first bullet gives MAJOR; renames follow §6.5.
+While a library's MAJOR is `0`, MINOR takes the role the first bullet gives MAJOR; renames follow §6.5, whose MAJOR stays literal.
 
 ## 8. Shared primitives
 
@@ -402,7 +402,7 @@ LIB_SHARED_REU_MUL_BANKS_USED = (1 .shl LIB_SHARED_REU_MUL_BANK) | (1 .shl (LIB_
 
 **DMA completion and settle (normative).** After every REU execute, the library MUST (a) confirm completion via the `$DF00` status bit before the next REU register access, and (b) observe a post-execute settle before that access. A settle met by intervening code is conformant.
 
-**Deferral.** `SHARED_REU_MUL_INIT` and `SHARED_REU_MUL_FETCH` **MUST be defined both or neither** — partial deferral is non-conformant. The §8.1 import-never-stub rule applies: a deferring build MUST NOT export a body under a canonical name.
+**Deferral.** `SHARED_REU_MUL_INIT` and `SHARED_REU_MUL_FETCH` **MUST be defined both or neither** — partial deferral is non-conformant. §8.1's stub ban applies: a deferring build MUST NOT export a body under a canonical name.
 
 **Registry.** `LIB_PRECALC_TABLE "reu_mul", 131072, PRECALC_REGION_REU, PRECALC_SHARED_YES, "<X>"` — the name `"reu_mul"` is normative.
 
