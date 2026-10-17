@@ -1,6 +1,6 @@
 # C64 Library ABI Contract
 
-**Version:** 1.2.3 (2026-09-07)
+**Version:** 1.3.0 (2026-10-17)
 **Status:** Stable.
 
 **Referencing a version.** Every version is tagged `v<version>` in this repository, so a consumer or adopter can pin, diff or cite a specific revision rather than tracking `main`. A tag's `SPEC.md` states its own version on the line above — check it rather than assuming.
@@ -38,13 +38,13 @@ They live in a dedicated file, conventionally `src/lib_version.s`, exported with
 
 **`LIB_<X>_ABI_VERSION` is independent of MAJOR.** It is a generation counter for the exported surface, not a mirror of the semantic version, and it increments on any breaking export change — a removed or renamed symbol, a changed calling convention, a changed memory model. It cannot track MAJOR, because a library may break its surface on a MINOR bump while pre-1.0, leaving MAJOR at `0` carrying no signal. A consumer gating on the counter would then never fire for exactly the changes the gate exists to catch. §7 says when a change to an exported symbol's contract moves the counter even though the export list did not change.
 
-**TU isolation (required).** The deprecated bare exports below MUST live in a translation unit that exports nothing else — no §5 manifest equates, no §8.4 table equates, no code (§6.1 member isolation). §5's aggregate equates therefore live in `src/lib_manifest.s`.
+**TU isolation (required).** The deprecated bare exports below MUST live in a translation unit that exports nothing but them and their prefixed counterparts — no §5 manifest equates, no §8.4 table equates, no code (§6.1 member isolation). §5's aggregate equates therefore live in `src/lib_manifest.s`.
 
 **Deprecated bare forms.** Every library MUST *also* export unprefixed `LIB_VERSION_MAJOR` / `LIB_VERSION_MINOR` / `LIB_VERSION_PATCH` / `LIB_ABI_VERSION`, so existing single-library consumers keep working. These names are **deprecated**: they are identical across every library, so a consumer linking two of them and importing both manifests gets `ld65: Error: Duplicate external identifier`. They MUST be gated on `LIB_NO_BARE_EXPORTS` so a composing consumer can suppress them build-wide with `ca65 -D LIB_NO_BARE_EXPORTS=1`.
 
 > Their removal was previously scheduled for contract v1.0. It is **deferred to a future MAJOR** and deliberately not bundled with this release: dropping four exports is a real ABI change for every adopter, and it should not ride along with a release whose headline is that text was deleted. It will be its own release, with its own review.
 
-**Zero-consumer carve-out.** A library onboarding with **no released consumers** SHOULD NOT export the bare forms at all — it has no existing consumer to protect, so the export adds a claimant to the exact four colliding names and defends no one. "No released consumers" means no tagged release any consumer pins, checkable from the library's own tags and `consumers.md`. A library that has cut a release someone links keeps the MUST. This is SHOULD NOT rather than MUST NOT because the bare forms are harmless in a single-library link; what a library MUST NOT do is ship them ungated.
+**Zero-consumer carve-out.** A library onboarding with **no released consumers** SHOULD NOT export the bare forms at all — it has no existing consumer to protect, so the export adds a claimant to the exact four colliding names and defends no one. "No released consumers" means no consumer release links any of the library's tags. The test applies when the forms are dropped: a library that dropped them while it had none need not restore them, and one that ships them keeps the MUST. This is SHOULD NOT rather than MUST NOT because the bare forms are harmless in a single-library link; what a library MUST NOT do is ship them ungated.
 
 **Pattern:**
 
@@ -189,7 +189,7 @@ Neither is ever an error, and neither condition is one a consumer can evaluate: 
 
 ## 5. Aggregate manifest equates
 
-Every library MUST export the following four integer equates, from `src/lib_manifest.s` — **not** `src/lib_version.s`, which §1 requires to carry the deprecated bare exports and nothing else, so that importing a manifest equate cannot drag them into the link:
+Every library MUST export the following four integer equates, from `src/lib_manifest.s` — **not** `src/lib_version.s`, which §1 requires to carry the deprecated bare exports and their prefixed forms only, so that importing a manifest equate cannot drag them into the link:
 
 | Symbol | Semantics |
 |---|---|
@@ -204,7 +204,7 @@ Libraries consuming one or more §8 shared primitives MUST additionally export `
 
 **The basis is the placed span.** Each figure measures the segments it covers **as placed** — the extent they occupy in a real link, including alignment fill **internal** to them — **not** the sum of member object sizes. A sum is exact only where no segment takes fragments from two objects *and* every inter-segment gap is charged; neither is guaranteed, and both stop holding silently on a file split or a translation-unit reorder.
 
-**Charge what is inside each segment, and nothing between or before them.** Both of those gaps are `(-previous_end) mod alignment`, fixed by where the consumer places the segments and in what order — reordering relocates such padding and can multiply it — so neither is a library property. **A consumer reserving one contiguous region pays both, and cannot derive them from these equates**: they need per-segment extents, which appear only in its own link map.
+**The span excludes fill between or before the segments.** Both of those gaps are `(-previous_end) mod alignment`, fixed by where the consumer places the segments and in what order — reordering relocates such padding and can multiply it — so neither is a library property. **A consumer reserving one contiguous region pays both, and cannot derive them from these equates**: they need per-segment extents, which appear only in its own link map.
 
 **This governs the basis, not the scope.** Which segments a figure covers is unchanged.
 
@@ -220,7 +220,7 @@ Libraries consuming one or more §8 shared primitives MUST additionally export `
 
 ### 6.1 Targets and artifact names
 
-Every library MUST provide `make lib`, producing `build/lib/<shortname>.a`. `<shortname>` is the library's §1 prefix, lowercased (`nistcurves`, `x25519`, `polyval`, `chacha20poly1305`, `mlkem`).
+Every library MUST provide `make lib`, producing `build/lib/<shortname>.a`. `<shortname>` is the library's §1 prefix, lowercased with underscores removed (`nistcurves`, `x25519`, `polyval`, `chacha20poly1305`, `mlkem`).
 
 Consumers fetch `build/lib/<shortname>[-<variant>].a` and link directly. No mid-build `sed`, no copying intermediates around, and **no `ar65` member surgery** — an archive is consumed as shipped.
 
@@ -243,7 +243,7 @@ A library shipping more than one archive (per-variant, per-profile) MUST ensure 
 
 ### 6.5 The consumer-facing name surface
 
-Renames of exported symbols, archive members, segment names or make targets MUST go through a deprecation window: ship the new name alongside the old one from the library's next MINOR release, and drop the old form at its next MAJOR.
+Renames of exported symbols, segment names or make targets MUST go through a deprecation window: ship the new name alongside the old one from the library's next MINOR release, and drop the old form at its next MAJOR.
 
 A deprecated alias MUST be gated by `LIB_NO_BARE_EXPORTS` wherever the old name is one that collides across libraries — an ungated alias preserves the collision it exists to retire for the whole window.
 
@@ -254,9 +254,9 @@ A deprecated alias MUST be gated by `LIB_NO_BARE_EXPORTS` wherever the old name 
 - **PATCH** — bug fix only, no ABI surface change.
 - **`LIB_<X>_ABI_VERSION`** is not derived from MAJOR (§1). The consumer-side gate `.assert LIB_<X>_ABI_VERSION = <expected>, lderror, "..."` is the load-bearing breakage check — `.assert`/`lderror`, never `.if`/`.error`.
 
-**Whether the counter moves turns on what the code does, not on whether the export list changed.** It moves when a consumer conforming to the previously documented contract can be broken by the change — most often when an existing entry point's actual return set gains a value, since exhaustive handling silently becomes non-exhaustive. It holds when behaviour that was previously undocumented becomes documented, and when documentation is corrected to match code that did not change: a consumer relying on the wrong documented contract was already broken at every prior release, so the correction discloses that rather than causing it. This clause governs `LIB_<X>_ABI_VERSION` only. Such a change is not thereby MAJOR under the first bullet above, nor subject to the deprecation cycle below.
+**Whether the counter moves turns on what the code does, not on whether the export list changed.** It moves when a consumer conforming to the previously documented contract can be broken by the change — most often when an existing entry point's actual return set gains a value, since exhaustive handling silently becomes non-exhaustive. It holds when behaviour that was previously undocumented becomes documented, and when documentation is corrected to match code that did not change: a consumer relying on the wrong documented contract was already broken at every prior release, so the correction discloses that rather than causing it. This clause governs `LIB_<X>_ABI_VERSION` only. Such a change is not thereby MAJOR under the first bullet above.
 
-Breaking changes go through a one-MINOR-release deprecation cycle.
+While a library's MAJOR is `0`, MINOR takes the role the first bullet gives MAJOR; renames follow §6.5.
 
 ## 8. Shared primitives
 
