@@ -51,7 +51,9 @@ Options:
 Exit code:
   0  - all three adopters are byte-identical AND functionally correct.
   1  - any divergence (byte-level) or functional miscompare.
-  2  - tool-internal failure (missing source file, assemble error, ...).
+  2  - tool-internal failure (assemble error, ...).
+  3  - ADOPTER_SOURCE roster is stale: a configured source file or
+       entry label is missing. Fix the roster; nothing was compared.
 """
 
 import argparse
@@ -66,6 +68,10 @@ import textwrap
 from dataclasses import dataclass, field
 from typing import Iterable
 
+
+class RosterError(Exception):
+    """A configured ADOPTER_SOURCE path or entry label does not exist."""
+
 HOME = pathlib.Path.home()
 
 DEFAULT_PATHS = {
@@ -76,7 +82,7 @@ DEFAULT_PATHS = {
 
 # Per-adopter: (source-file relative to repo root, entry label or .proc name)
 ADOPTER_SOURCE = {
-    "chacha": ("src/lib/poly1305_lib.s", "ct_mul_8x8"),
+    "chacha": ("src/lib/shared_ct_mul.s", "ct_mul_8x8"),  # moved from poly1305_lib.s by CCP v0.12.0
     "nist-curves": ("src/mul_8x8.s", "mul_8x8"),
     "x25519": ("src/mul_8x8.s", "mul_8x8"),
 }
@@ -161,7 +167,7 @@ def extract_body(src_path: pathlib.Path, entry: str) -> tuple[list[str], int, in
             break
 
     if start is None:
-        raise RuntimeError(
+        raise RosterError(
             f"could not find `{entry}:` or `.proc {entry}` in {src_path}"
         )
 
@@ -446,9 +452,7 @@ def survey_adopter(
     rel, entry = ADOPTER_SOURCE[name]
     src_path = repo_root / rel
     if not src_path.is_file():
-        raise FileNotFoundError(
-            f"adopter `{name}` source missing: {src_path}"
-        )
+        raise RosterError(f"adopter `{name}` source missing: {src_path}")
 
     body_lines, src_start, src_end = extract_body(src_path, entry)
     if verbose:
@@ -600,6 +604,10 @@ def main() -> int:
         any_func_fail = any(r.func_fails for r in results)
         return 1 if (any_byte_diff or any_func_fail) else 0
 
+    except RosterError as e:
+        print(f"ct_mul_brute_check: FAIL: stale ADOPTER_SOURCE roster: {e}",
+              file=sys.stderr)
+        return 3
     except Exception as e:
         print(f"ct_mul_brute_check: {e}", file=sys.stderr)
         return 2
